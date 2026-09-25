@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# AutoFolio local data (개인정보 포함 가능 — 커밋 금지)
+.autofolio/
+data/

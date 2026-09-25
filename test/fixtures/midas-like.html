@@ -1,0 +1,116 @@
+<!doctype html>
+<!--
+  recruiter.co.kr(마이다스 계열) 지원서 구조를 흉내 낸 테스트 페이지.
+  docs/sites/recruiter-co-kr.md 에 기록한 관찰 내용을 재현한다:
+  - 검색형 UI: 키워드 + Enter → .searchResultList 의 button[data-code][title] → hidden 코드 필드
+  - 검색칸에는 키워드가 그대로 남음
+  - 자격증 선택 전에는 발급기관/등록번호/취득일 필드가 disabled
+  - 부분 일치 함정: "정보처리" 검색 시 정보처리기능사가 첫 번째 결과
+  - 폼 안에서 Enter → 제출 위험 (AutoFolio는 제출을 차단해야 함)
+-->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>이력서 작성 | 테스트 채용</title>
+<style>
+  .hidden { display: none; }
+  .searchResult { display: none; position: absolute; background: #fff; border: 1px solid #ccc; }
+  .search.searched .searchResult { display: block; }
+  .search { position: relative; }
+</style>
+</head>
+<body>
+<form id="resume" action="/submitted" method="post">
+  <h2>학력</h2>
+  <div class="edu">
+    <h3>대학교</h3>
+    <div class="row">
+      <h4>학위구분</h4>
+      <label><input type="radio" name="college[0].degreeTypeCode" value="40">전문학사</label>
+      <label><input type="radio" name="college[0].degreeTypeCode" value="50">학사</label>
+    </div>
+    <div class="row">
+      <h4>학교관련</h4>
+      <div class="search">
+        <label><input type="search" class="text" data-type="college" data-rel-target="college[0]" placeholder='키워드 입력 후 "Enter"로 검색'><span class="label">학교검색</span></label>
+        <div class="searchResult"><ul class="searchResultList"></ul></div>
+      </div>
+      <input type="text" class="hidden" name="college[0].academyCode" title="학교 코드">
+    </div>
+    <div class="row">
+      <h4>재학기간</h4>
+      <input type="text" class="text date start" name="college[0].entranceDate" placeholder="입학일">
+      <input type="text" class="text date end" name="college[0].graduationDate" placeholder="졸업일">
+    </div>
+    <div class="row">
+      <h4>졸업구분</h4>
+      <label><input type="radio" name="college[0].graduationTypeCode" value="01">졸업</label>
+      <label><input type="radio" name="college[0].graduationTypeCode" value="02">졸업예정</label>
+      <label><input type="radio" name="college[0].graduationTypeCode" value="07">재학</label>
+    </div>
+    <div class="row">
+      <h4>성적</h4>
+      <span>평점</span><input type="number" class="text" name="college[0].score" placeholder="평점" title="평점">
+      <span>/</span>
+      <select name="college[0].perfectScore"><option value="">만점기준</option><option>4.0</option><option>4.3</option><option>4.5</option></select>
+    </div>
+  </div>
+
+  <h2>자격증 / 면허증</h2>
+  <div class="cert">
+    <div class="search">
+      <label><input type="search" class="text" data-type="license" data-rel-target="license[0]" placeholder='키워드 입력 후 "Enter"로 검색'><span class="label">자격증검색</span></label>
+      <div class="searchResult"><ul class="searchResultList"></ul></div>
+    </div>
+    <input type="text" class="hidden" name="license[0].licenseCode" title="자격증코드" data-rel-target="license[0]">
+    <span>발급기관</span><input type="text" class="text" name="license[0].organization" placeholder="발급기관" title="발급기관" data-rel-target="license[0]" disabled>
+    <span>등록번호</span><input type="text" class="text" name="license[0].registNumber" placeholder="등록번호" title="등록번호" data-rel-target="license[0]" disabled>
+    <span>취득일</span><input type="text" class="text date" name="license[0].acquireDate" placeholder="취득일" title="취득일" data-rel-target="license[0]" disabled>
+  </div>
+
+  <h2>수상경력</h2>
+  <span>상훈명</span><input type="text" name="award[0].awardName" placeholder="상훈명을 입력하세요." title="상훈명">
+
+  <button type="button" id="save">임시저장</button>
+  <button type="submit" id="next">다음</button>
+</form>
+
+<script>
+  const DB = {
+    college: [["572", "숭실대학교"], ["9741", "숭실대학교 경영대학원"], ["9744", "숭실대학교 대학원"]],
+    license: [["101", "정보처리기능사"], ["102", "정보처리기능장"], ["103", "정보처리기사"], ["104", "정보처리산업기사"], ["201", "SQLD"]],
+  };
+  window.__submitted = false;
+  document.getElementById("resume").addEventListener("submit", (e) => { window.__submitted = true; e.preventDefault(); });
+
+  document.querySelectorAll("input[type=search]").forEach((input) => {
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      // 실제 사이트와 달리 여기서는 기본 동작(폼 제출)을 막지 않는다 → AutoFolio의 제출 차단을 검증
+      const box = input.closest(".search");
+      const list = box.querySelector(".searchResultList");
+      const q = input.value.trim();
+      setTimeout(() => {
+        list.innerHTML = DB[input.dataset.type]
+          .filter(([, name]) => name.includes(q))
+          .map(([code, name]) => `<li><button type="button" class="ellipsis" data-code="${code}" title="${name}">${name}</button></li>`)
+          .join("");
+        box.classList.add("searched");
+      }, 300);
+    });
+  });
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".searchResultList button");
+    if (!btn) return;
+    const box = btn.closest(".search");
+    const input = box.querySelector("input[type=search]");
+    const target = input.dataset.relTarget;
+    const holder = document.querySelector(`[name="${target}.academyCode"], [name="${target}.licenseCode"]`);
+    holder.value = btn.dataset.code;
+    box.classList.remove("searched");
+    document.querySelectorAll(`[data-rel-target="${target}"]:disabled`).forEach((el) => (el.disabled = false));
+  });
+</script>
+</body>
+</html>
