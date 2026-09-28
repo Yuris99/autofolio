@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>AutoFolio 브라우저 검증</title>
+<script>
+  let listener;
+  window.chrome = { runtime: { onMessage: { addListener(callback) { listener = callback; } } } };
+</script>
+<fieldset>
+  <legend>인적사항</legend>
+  <label>이름 <input name="applicant_name"></label>
+  <label>이메일 <input name="email" type="email"></label>
+</fieldset>
+<fieldset>
+  <legend>학력</legend>
+  <label>졸업일 <input name="graduation" type="date"></label>
+  <label>학교명 <select name="school"><option value="">선택</option><option value="SSU">숭실대학교</option></select></label>
+</fieldset>
+<script src="../extension/content.js"></script>
+<script>
+  const result = {};
+  listener({ action: "scan" }, null, response => { result.scan = response; });
+  const byName = Object.fromEntries(result.scan.fields.map(field => [field.name, field.token]));
+  listener({ action: "fill", items: [
+    { token: byName.applicant_name, value: "홍길동" },
+    { token: byName.email, value: "hong@example.com" },
+    { token: byName.graduation, value: "2024.02.20" },
+    { token: byName.school, value: "숭실대학교" }
+  ] }, null, response => {
+    const passed = response.results.every(item => item.status === "filled") &&
+      document.querySelector('[name="graduation"]').value === "2024-02-20" &&
+      document.querySelector('[name="school"]').value === "SSU";
+    document.body.dataset.testResult = passed ? "PASS" : "FAIL";
+    document.body.dataset.testDetails = JSON.stringify(response.results);
+  });
+</script>
+</html>

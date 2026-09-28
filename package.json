@@ -1,0 +1,6 @@
+{
+  "name": "autofolio",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test tests/matcher.test.mjs" }
+}

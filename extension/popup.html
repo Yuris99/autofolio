@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoFolio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="popup">
+  <header><h1>AutoFolio</h1><button id="profile" class="link">내 이력 편집</button></header>
+  <p class="muted">지원서에서 분석한 입력칸을 확인하고 채우세요. 제출은 직접 합니다.</p>
+  <label class="toggle"><input id="useLaya" type="checkbox"> 로컬 Laya로 모르는 칸 분석</label>
+  <div class="actions"><button id="scan">현재 페이지 분석</button><button id="fill" disabled>선택한 칸 채우기</button></div>
+  <p id="status" role="status">이력을 저장한 뒤 지원서 페이지에서 분석하세요.</p>
+  <div id="fields"></div>
+  <div id="report" aria-live="polite"></div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

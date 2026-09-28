@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoFolio 내 이력</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="options">
+  <main>
+    <h1>내 이력</h1>
+    <p class="muted">입력한 정보는 이 브라우저의 확장 프로그램 저장소에 보관됩니다. 빈 항목은 자동 입력하지 않습니다.</p>
+    <form id="profileForm">
+      <section><h2>인적사항</h2><div id="personal" class="grid"></div></section>
+      <section><h2>학력</h2><div id="education"></div><button type="button" id="addEducation" class="secondary">+ 학력 추가</button></section>
+      <section><h2>자격증</h2><div id="certificate"></div><button type="button" id="addCertificate" class="secondary">+ 자격증 추가</button></section>
+      <button type="submit">이력 저장</button><span id="saved" role="status"></span>
+    </form>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

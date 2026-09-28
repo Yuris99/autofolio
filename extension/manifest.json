@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "AutoFolio",
+  "version": "0.1.0",
+  "description": "저장한 이력으로 지원서 입력칸을 채우고 결과를 확인합니다.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1:8000/*"],
+  "action": { "default_title": "AutoFolio", "default_popup": "popup.html" },
+  "options_page": "options.html"
+}
