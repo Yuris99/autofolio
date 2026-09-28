@@ -181,8 +181,8 @@
           row.querySelector(".searchResultName").textContent = item;
           input.value = "";
           list.replaceChildren();
-          const relId = row.querySelector("[data-rel-id]").dataset.relId;
-          document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
+          // The code is set silently; the linked fields open only when the code input reports a
+          // change (like the site's linkedForm), which a script-driven click alone does not do.
         };
         // Markup from the real site's diagnostic log: ul.searchResultList > li > button.ellipsis > strong
         // for certificates, and an <li> nested inside the button for exams.
@@ -206,6 +206,11 @@
     });
   }
   document.addEventListener("click", event => event.target.closest(".search label")?.closest(".search").classList.add("open"));
+  // linkedForm-like: a change on a [data-rel-id] input enables the fields that name it.
+  document.addEventListener("change", event => {
+    const relId = event.target.dataset?.relId;
+    if (relId && event.target.value) document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
+  });
   const searchItems = { foreignExam: ["TOEIC", "TOEIC Speaking", "TOEFL iBT"], license: ["정보처리기사", "정보처리산업기사", "정보처리기능사", "SQL개발자", "SQL전문가"] };
   for (const input of document.querySelectorAll("input[type='search']")) recruiterSearch(input, searchItems[input.dataset.type]);
 

@@ -328,6 +328,20 @@
     else for (const type of ["keydown", "keypress", "keyup"]) element.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", bubbles: true }));
   }
 
+  // End a pick the way a person's click does: focus leaves the search box (sites often commit the
+  // choice on blur), and inputs the pick changed announce it, so linked fields such as a
+  // certificate's issuer and date get enabled (recruiter.co.kr links them via data-rel-id).
+  async function finishPick(element, option, before) {
+    if (option.isConnected && typeof option.focus === "function") option.focus();
+    if (document.activeElement === element) element.blur();
+    for (const [input, value] of before) {
+      if (!input.isConnected || input === element || input.value === value) continue;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    await wait(300);
+  }
+
   // After a pick, the text can land outside the box: a hidden input or a "selected" label in the same row.
   function shownNearby(element, text) {
     const { normalize } = globalThis.AutoFolioMatch;
@@ -399,13 +413,18 @@
       const shown = listed.length ? ` (${picked.candidates.length ? "" : "결과: "}${listed.join(", ")}${!picked.candidates.length && texts.length > 3 ? " …" : ""})` : "";
       return { token: item.token, status: "review", detail: `검색 결과: ${picked.reason}${shown}${searched}. 직접 선택하세요.` };
     }
+    const row = loopRow(element) || element.closest(".row, li, tr, .field, .form-group") || element.parentElement;
+    const before = new Map([...row.querySelectorAll("input")].map(input => [input, input.value]));
     choose(options[picked.index]);
     await wait(300);
+    await finishPick(element, options[picked.index], before);
     const stillOpen = visibleOptions(element).some(option => options.includes(option));
     if (!stillOpen && (shownNearby(element, texts[picked.index]) || normalize(read(element)) === normalize(value))) {
       // The box itself may be cleared after a pick, so the settle-time recheck is skipped (no expected).
       const check = picked.loose ? " · 비슷한 이름으로 골랐으니 확인하세요" : "";
-      return { token: item.token, status: "filled", detail: `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}${check}` };
+      const locked = [...row.querySelectorAll("input[data-rel-target], select[data-rel-target], textarea[data-rel-target]")].filter(field => field.disabled).length;
+      const lockedNote = locked ? ` · 선택 후에도 세부 칸 ${locked}개가 잠겨 있음` : "";
+      return { token: item.token, status: "filled", detail: `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}${check}${lockedNote}` };
     }
     return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 선택했지만 화면에서 확인되지 않습니다. 확인하세요.` };
   }
