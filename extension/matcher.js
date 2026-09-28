@@ -127,7 +127,13 @@ function matchSection(text, context) {
   return null;
 }
 
-function infer(label, context, internal) {
+// Placeholders that are sample values rather than descriptions ("abc@xxx.com", "010-1234-1234").
+const EXAMPLES = [
+  ["personal.email", /^[\w.+-]+@[\w-]+(\.[\w-]+)+$/],
+  ["personal.phone", /^0\d{1,2}[-. ]?\d{3,4}[-. ]?\d{4}$/]
+];
+
+function infer(label, context, internal, leaf, placeholder) {
   if (label) {
     for (const [type, pattern] of RULES) {
       if (pattern.test(label)) return { type, reason: "라벨 규칙" };
@@ -137,25 +143,34 @@ function infer(label, context, internal) {
     for (const [fallback, pattern] of FALLBACK_RULES) {
       if (pattern.test(label)) return { type: fallback, reason: "라벨 규칙" };
     }
-    return null;
   }
-  // Internal names are useful only when the page provides no visible description.
-  const type = matchSection(internal, context);
-  if (type) return { type, reason: "필드 속성" };
-  for (const [ruleType, pattern] of RULES) {
-    if (pattern.test(internal)) return { type: ruleType, reason: "필드 속성" };
+  const example = EXAMPLES.find(([, pattern]) => pattern.test(String(placeholder || "").trim()));
+  if (example) return { type: example[0], reason: "입력 예시" };
+  // Internal names decide when the visible text did not: the last part first
+  // ("basicInfoGroupAnswers.mobilePhone" → "mobile Phone"), then the whole name.
+  for (const text of [leaf, internal].filter(Boolean)) {
+    const type = matchSection(text, context);
+    if (type) return { type, reason: "필드 속성" };
+    for (const [ruleType, pattern] of RULES) {
+      if (pattern.test(text)) return { type: ruleType, reason: "필드 속성" };
+    }
   }
   return null;
 }
+
+// Reference values the site asks for, not the applicant's own ("만점기준", perfectScore).
+const NOT_PROFILE = /만점|최고\s*점수|perfect\s*score|max\s*score/i;
 
 export function classify(field) {
   // title is often the only thing telling apart two inputs under one row title ("복무기간": 시작일 / 종료일).
   const label = [...new Set([field.label, field.placeholder, field.ariaLabel, field.title].filter(Boolean))].join(" ").trim();
   const internal = [splitName(field.name), splitName(field.id)].filter(Boolean).join(" ");
+  const leaf = splitName(String(field.name || field.id || "").split(".").pop());
   const context = [field.section, field.name, field.id].filter(Boolean).join(" ");
   if (!label && !context) return { type: null, reason: "필드 설명 없음" };
 
-  const result = infer(label, context, internal);
+  if (NOT_PROFILE.test(`${label} ${internal}`)) return { type: null, reason: "기준값 칸" };
+  const result = infer(label, context, internal, leaf, field.placeholder);
   if (!result) return { type: null, reason: "확인 필요" };
   if (result.type.startsWith("personal.") && OTHER_PERSON.test(`${label} ${context}`)) {
     return { type: null, reason: "추천인·가족 등 다른 사람 칸" };

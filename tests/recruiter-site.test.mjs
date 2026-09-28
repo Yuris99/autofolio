@@ -44,3 +44,18 @@ for (const [field, type] of [
 ]) {
   test(`recruiter.co.kr exam ${field.label || field.name} → ${type}`, () => assert.equal(classify(field).type, type));
 }
+
+// recruiter.co.kr v1 forms (mobis.recruiter.co.kr/v1/applicant/resume-form, log of 2026-09-28 14:57):
+// labels were not read, only placeholders with sample values; the internal names are clear.
+for (const [field, type] of [
+  [{ label: "", placeholder: "홍길동", name: "basicInfoGroupAnswers.name" }, "personal.name"],
+  [{ label: "", placeholder: "010-1234-1234", name: "basicInfoGroupAnswers.mobilePhone" }, "personal.phone"],
+  [{ label: "", placeholder: "abc@xxx.com", name: "basicInfoGroupAnswers.email" }, "personal.email"],
+  [{ label: "", placeholder: "Gil Dong Hong", name: "basicInfoGroupAnswers.englishName" }, "personal.englishName"],
+  [{ label: "", placeholder: "010-1234-1234", name: "" }, "personal.phone"],
+  [{ label: "", placeholder: "abc@xxx.com", name: "" }, "personal.email"],
+  [{ label: "소속 학회/연구실/동아리 Society/Laboratory/Club information",
+    name: "applySectorGroupAnswers.additionalQuestionAnswers.questionTextAnswerList.questionSn-8138942" }, null]
+]) {
+  test(`recruiter.co.kr v1 ${field.name || field.placeholder} → ${type}`, () => assert.equal(classify(field).type, type));
+}

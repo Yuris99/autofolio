@@ -51,3 +51,4 @@ test("fixture form is filled and search boxes are resolved in a browser", { skip
 test("profile page renders, adds, removes and saves entries", { skip }, () => runFixture("options-fixture.html"));
 test("recruiter.co.kr-shaped form is classified and filled end to end", { skip }, () => runFixture("recruiter-fixture.html"));
 test("a pick that opens a login window is handed to the user", { skip }, () => runFixture("login-fixture.html"));
+test("newer forms: div labels, sample placeholders, one name per radio", { skip }, () => runFixture("v1-fixture.html"));

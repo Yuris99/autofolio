@@ -9,7 +9,8 @@
   const log = (...args) => console.info("%c[AutoFolio]", "color:#2358d0;font-weight:bold", ...args);
 
   // The group heading (h2 "추천인", legend "학력"), not the row title beside the input.
-  const HEADINGS = ":scope > legend, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > .section-title, :scope > header";
+  const HEADINGS = ":scope > legend, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > .section-title, :scope > header, " +
+    ":scope > :not(label)[class*='title' i], :scope > :not(label)[class*='heading' i]";
   function nearbySection(element) {
     let node = element.parentElement;
     for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
@@ -20,13 +21,15 @@
     return "";
   }
 
-  // A row title placed before the input's wrapper: <label class="title">계급</label><label class="select"><select>.
+  // A row title placed before the input or its wrapper: <label class="title">계급</label><label class="select"><select>,
+  // or in newer forms any short text element: <div class="label">이름</div><div><input></div>.
   function rowTitle(element) {
     let node = element;
     for (let depth = 0; node && depth < 3; depth++, node = node.parentElement) {
       for (let sibling = node.previousElementSibling; sibling; sibling = sibling.previousElementSibling) {
-        if (sibling.matches("th, dt, .title, label") && !sibling.querySelector(CONTROLS)) return textOf(sibling);
-        if (sibling.querySelector("input, select, textarea")) break;
+        if (sibling.matches("input, select, textarea") || sibling.querySelector("input, select, textarea")) break;
+        const text = sibling.querySelector(CONTROLS) ? "" : textOf(sibling);
+        if (text && text.length <= 30) return text;
       }
     }
     return "";
@@ -66,7 +69,10 @@
 
   // The text of one radio choice ("남"), not the question label that may also point at it.
   function choiceText(radio) {
-    return textOf(radio.closest("label")) || labelFor(radio) || radio.value;
+    const next = radio.nextElementSibling;
+    const nextText = next && !next.matches(CONTROLS) && !next.querySelector("input") ? textOf(next) : "";
+    const own = [...(radio.labels || [])].map(textOf).filter(Boolean).join(" ");
+    return textOf(radio.closest("label")) || own || nextText || (radio.value && radio.value !== "on" ? radio.value : "") || radio.name;
   }
 
   // One field per radio group: its question, not any single choice, is what gets classified.
@@ -119,9 +125,18 @@
   }
 
   function radioGroup(element) {
-    if (!element.name) return [element];
     const scope = element.form || document;
-    return [...scope.querySelectorAll(`input[type="radio"][name="${CSS.escape(element.name)}"]`)];
+    const named = element.name ? [...scope.querySelectorAll(`input[type="radio"][name="${CSS.escape(element.name)}"]`)] : [element];
+    if (named.length > 1) return named;
+    // Some forms give each choice its own name (name="남", name="여"): radios side by side whose
+    // names are all unique are one question.
+    for (let node = element.parentElement, depth = 0; node && depth < 3; node = node.parentElement, depth++) {
+      const radios = [...node.querySelectorAll("input[type='radio']")];
+      if (radios.length < 2) continue;
+      const lonely = radios.every(radio => !radio.name || radios.filter(other => other.name === radio.name).length === 1);
+      return lonely ? radios : named;
+    }
+    return named;
   }
 
   function groupLabel(element) {
@@ -139,7 +154,10 @@
       const text = textOf(heading);
       if (text && !radios.some(radio => heading.contains(radio))) return text;
     }
-    return nearbySection(element);
+    // Newer forms: <div class="form-label">성별</div><div>(radios)</div>.
+    let common = element.parentElement;
+    while (common && !radios.every(radio => common.contains(radio))) common = common.parentElement;
+    return (common && rowTitle(common)) || nearbySection(element);
   }
 
   function chooseRadio(element, value) {
