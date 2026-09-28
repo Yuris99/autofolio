@@ -37,7 +37,7 @@ test("only saved nonempty profile values become candidates", () => {
   });
   assert.deepEqual(values.map(item => item.value), ["홍길동", "한국대학교", "정보처리기사", "SQLD", "TOEIC", "900"]);
   assert.equal(values.at(-1).label, "TOEIC · 900");
-  assert.equal(describeType("language.score"), "어학의 점수·등급");
+  assert.equal(describeType("language.score"), "어학의 점수");
 });
 
 test("backup files are reduced to known fields", () => {

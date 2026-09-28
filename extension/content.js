@@ -342,15 +342,15 @@
     await wait(300);
   }
 
-  // Fallback when the page did not react to the pick: open the fields the page itself marks as
-  // belonging to it (data-rel-target naming the row's data-rel-id), but only when that linked
-  // input now holds a value, i.e. the pick really happened. This is what the site does after a
-  // person's click; nothing outside those marked fields is touched.
+  // Fallback when the page did not react to a pick it shows: open the fields the page itself marks
+  // as belonging to it (data-rel-target naming the row's data-rel-id). On recruiter.co.kr only the
+  // newest "+" row reacts to picks, so rows added earlier stay locked after a successful pick.
+  // Called only after the pick is confirmed on screen; nothing outside those marked fields is touched.
   async function openLinkedFields(row) {
     let opened = 0;
     for (const source of row.querySelectorAll("[data-rel-id]")) {
       const relId = source.dataset.relId;
-      if (!relId || !source.value) continue;
+      if (!relId) continue;
       for (const field of document.querySelectorAll(`[data-rel-target="${CSS.escape(relId)}"]`)) {
         if (!field.disabled) continue;
         field.disabled = false;

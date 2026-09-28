@@ -51,3 +51,22 @@ test("search terms are the saved name, then its other names as written", () => {
   assert.deepEqual(searchTerms("토익"), ["토익", "TOEIC"]);
   assert.deepEqual(searchTerms("무슨자격"), ["무슨자격"]);
 });
+
+// Result lists seen on recruiter.co.kr (diagnostic logs, 2026-09-28).
+test("the plain entry wins over its noted variants", () => {
+  const picked = pickOption("토익스피킹", ["Toeic Speaking test", "Toeic Speaking test(2년이상 직접등록)", "Toeic Speaking test(해외)"]);
+  assert.equal(picked.index, 0);
+  assert.equal(picked.loose, true);
+});
+
+test("a listed entry wins over the site's 'register this name' entry", () => {
+  assert.equal(pickOption("TOPCIT 수준4", ["TOPCIT (ICT역량지수평가) 수준3", "TOPCIT (ICT역량지수평가) 수준4", "TOPCIT 수준4 (으)로 등록하기"]).index, 1);
+  assert.equal(pickOption("SQLD", ["SQLD (SQL개발자) (으)로 등록하기", "SQLD (SQL개발자)"]).index, 1);
+});
+
+test("the register entry is used only when the list has no match", () => {
+  const picked = pickOption("COS PRO 1급(C++)", ["COS PRO 1급(C++) (으)로 등록하기"]);
+  assert.equal(picked.index, 0);
+  assert.equal(picked.loose, true);
+  assert.match(picked.reason, /직접 등록/);
+});

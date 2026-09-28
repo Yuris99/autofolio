@@ -33,3 +33,14 @@ for (const [field, type] of expected) {
     assert.equal(classify(field).type, type);
   });
 }
+
+// Exam detail fields that open after an exam is picked (log of 2026-09-28 08:36).
+for (const [field, type] of [
+  [{ label: "등록번호", section: "공인외국어시험 24.09.18 이후 점수만 인정", name: "languageExam[0].registNumber" }, "language.number"],
+  [{ label: "응시일", section: "공인외국어시험 24.09.18 이후 점수만 인정", name: "languageExam[0].examDate" }, "language.obtainedDate"],
+  [{ label: "", section: "공인외국어시험 24.09.18 이후 점수만 인정", name: "languageExam[0].gradeCode", inputType: "select" }, "language.grade"],
+  [{ label: "취득점수", section: "공인외국어시험 24.09.18 이후 점수만 인정", name: "languageExam[0].score", inputType: "number" }, "language.score"],
+  [{ label: "만점기준", section: "공인외국어시험 24.09.18 이후 점수만 인정", name: "languageExam[0].perfectScore", inputType: "number" }, null]
+]) {
+  test(`recruiter.co.kr exam ${field.label || field.name} → ${type}`, () => assert.equal(classify(field).type, type));
+}

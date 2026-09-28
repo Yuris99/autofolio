@@ -38,17 +38,39 @@
     return [own, ...row.filter(name => normalize(name) !== normalize(own))].filter(Boolean);
   }
 
+  // "COS PRO 1급 (으)로 등록하기": an entry for registering a name the site's list does not have.
+  const CUSTOM_ENTRY = /\s*\(?\s*으\s*\)?\s*로\s*(직접\s*)?등록\s*하기\s*$|\s*직접\s*(입력|등록)\s*$/;
+
   // Returns { index, reason } when one option clearly matches, otherwise
   // { index: -1, reason, candidates } so the user decides. loose marks a pick by a similar name.
+  // Real list entries are preferred; a "register this name" entry is used only when none matches.
   function pickOption(value, optionTexts) {
+    const all = optionTexts.map((text, index) => {
+      const raw = String(text ?? "").trim();
+      const custom = CUSTOM_ENTRY.test(raw);
+      const name = custom ? raw.replace(CUSTOM_ENTRY, "") : raw;
+      return { index, text: raw, custom, full: normalize(name), bare: withoutNotes(name), notes: notesOf(name) };
+    }).filter(option => option.full);
+    const listed = pickAmong(value, all.filter(option => !option.custom));
+    if (listed.index >= 0 || listed.candidates.length) return listed;
+    const custom = pickAmong(value, all.filter(option => option.custom));
+    if (custom.index >= 0) return { ...custom, reason: `${custom.reason} · 직접 등록 항목`, loose: true };
+    return custom.candidates.length ? custom : listed;
+  }
+
+  function pickAmong(value, options) {
     const names = namesFor(value);
     if (!names.size) return { index: -1, reason: "값 없음", candidates: [] };
-    const options = optionTexts.map((text, index) => ({
-      index, text: String(text ?? "").trim(), full: normalize(text), bare: withoutNotes(text), notes: notesOf(text)
-    })).filter(option => option.full);
     const one = (matches, reason, ambiguous, loose = false) => {
       if (matches.length === 1) return { index: matches[0].index, reason, loose };
-      if (matches.length > 1) return { index: -1, reason: ambiguous, candidates: matches.slice(0, 5).map(option => option.text) };
+      if (matches.length > 1) {
+        // "Toeic Speaking test" vs "…(해외)", "…(2년이상 직접등록)": the one entry without a note is the standard one.
+        const plain = matches.filter(option => !option.notes.length);
+        if (plain.length === 1 && new Set(matches.map(option => option.bare)).size === 1) {
+          return { index: plain[0].index, reason: `${reason} · 괄호 없는 기본 항목`, loose };
+        }
+        return { index: -1, reason: ambiguous, candidates: matches.slice(0, 5).map(option => option.text) };
+      }
       return null;
     };
 
@@ -59,7 +81,7 @@
       // The only result containing the name ("SQLD" → "SQLD 자격검정"), or contained in it.
       one(options.filter(option => [...names].some(name =>
         option.full.includes(name) || (option.full.length >= 3 && option.full.length * 2 >= name.length && name.includes(option.full)))),
-      "비슷한 이름 1개", "비슷한 결과가 여러 개", true) ||
+      "비슷한 이름", "비슷한 결과가 여러 개", true) ||
       { index: -1, reason: "일치하는 결과 없음", candidates: [] };
   }
 
