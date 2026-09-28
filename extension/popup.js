@@ -147,6 +147,7 @@ document.getElementById("scan").addEventListener("click", async () => {
     }
     render(values, suggestions);
     currentRun = createRun(pageUrl, fields, suggestions);
+    currentRun.version = chrome.runtime.getManifest().version;
     if (layaError) currentRun.notes.push(layaError);
     await recordRun(currentRun);
     if (layaError) { setStatus(`${layaError}. 규칙 결과를 표시합니다.`); return; }
