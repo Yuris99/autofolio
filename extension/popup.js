@@ -1,4 +1,5 @@
 import { allValues, classify, describeType, FIELD_TYPES } from "./matcher.js";
+import { addFill, createRun, saveRun, summarize } from "./run-log.js";
 
 const fieldsRoot = document.getElementById("fields");
 const status = document.getElementById("status");
@@ -9,6 +10,20 @@ let tabId;
 let fields = [];
 let choices = [];
 let pageUrl = "";
+let currentRun = null;
+const logSummary = document.getElementById("logSummary");
+
+async function recordRun(run) {
+  const { runLog = [] } = await chrome.storage.local.get("runLog");
+  const updated = saveRun(runLog, run);
+  await chrome.storage.local.set({ runLog: updated });
+  showLogSummary(updated);
+}
+
+function showLogSummary(runLog) {
+  const { runs, filled, review, failed } = summarize(runLog);
+  logSummary.textContent = runs ? `진단 기록 ${runs}회 · 입력 ${filled} · 확인 필요 ${review} · 실패 ${failed}` : "진단 기록 없음";
+}
 
 function fieldKey(field) {
   return [new URL(pageUrl).origin, field.section, field.label, field.name, field.inputType]
@@ -99,6 +114,7 @@ document.getElementById("scan").addEventListener("click", async () => {
         : classify(field)
     ]));
     let modelCount = 0;
+    let layaError = "";
     if (layaToggle.checked) {
       setStatus(`입력칸 ${fields.length}개를 찾았습니다. 로컬 Laya가 모르는 칸을 분석 중입니다.`);
       try {
@@ -107,10 +123,14 @@ document.getElementById("scan").addEventListener("click", async () => {
           if (type) { suggestions.set(field.token, { type, reason: "Laya 제안 · 확인 필요" }); modelCount++; }
         }
       } catch (error) {
-        setStatus(`Laya 연결 실패: ${error.message}. 규칙 결과를 표시합니다.`);
+        layaError = `Laya 연결 실패: ${error.message}`;
       }
     }
     render(values, suggestions);
+    currentRun = createRun(pageUrl, fields, suggestions);
+    if (layaError) currentRun.notes.push(layaError);
+    await recordRun(currentRun);
+    if (layaError) { setStatus(`${layaError}. 규칙 결과를 표시합니다.`); return; }
     setStatus(`입력칸 ${fields.length}개 · 저장된 값 ${values.length}개 · Laya 제안 ${modelCount}개. 아래 매핑을 확인하세요.`);
   } catch (error) { setStatus(error.message); }
 });
@@ -144,11 +164,37 @@ fillButton.addEventListener("click", async () => {
       row.textContent = `미완료/검증 오류: ${invalidFields.join(", ")}`;
       report.append(row);
     }
+    if (currentRun) {
+      const chosen = new Map(choices.filter(choice => choice.select.value)
+        .map(choice => [choice.token, choice.select.value.slice(0, choice.select.value.lastIndexOf(":"))]));
+      await recordRun(addFill(currentRun, chosen, results, invalidFields));
+    }
     const reviewCount = results.filter(result => result.status === "review").length;
     setStatus(`${results.filter(result => result.status === "filled").length}/${items.length}개 입력 확인${reviewCount ? ` · ${reviewCount}개 직접 선택 필요(?)` : ""}. 내용을 확인한 뒤 직접 제출하세요.`);
-  } catch (error) { setStatus(`입력 실패: ${error.message}`); }
+  } catch (error) {
+    setStatus(`입력 실패: ${error.message}`);
+    if (currentRun) { currentRun.notes.push(`입력 실패: ${error.message}`); await recordRun(currentRun); }
+  }
   fillButton.disabled = false;
 });
 
-const { useLaya = false } = await chrome.storage.local.get("useLaya");
+document.getElementById("exportLog").addEventListener("click", async () => {
+  const { runLog = [] } = await chrome.storage.local.get("runLog");
+  const data = { app: "autofolio", kind: "diagnostic-log", version: 1, exportedAt: new Date().toISOString(), runs: runLog };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `autofolio-진단기록-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
+document.getElementById("clearLog").addEventListener("click", async () => {
+  if (!confirm("진단 기록을 모두 지울까요?")) return;
+  await chrome.storage.local.set({ runLog: [] });
+  showLogSummary([]);
+});
+
+const { useLaya = false, runLog = [] } = await chrome.storage.local.get(["useLaya", "runLog"]);
 layaToggle.checked = useLaya;
+showLogSummary(runLog);

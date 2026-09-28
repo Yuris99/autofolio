@@ -34,4 +34,6 @@ section { background: white; border: 1px solid #dce3ef; border-radius: 12px; pad
 .entry .grid { margin-bottom: 9px; }
 #report { margin: 12px 0; font-size: 13px; }
 #report p { margin: 4px 0; }
+footer.log { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 14px; padding-top: 10px; border-top: 1px solid #dce3ef; }
+footer.log .muted { flex: 1; }
 #saved { margin-left: 10px; color: #1d6b43; }

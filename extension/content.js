@@ -2,6 +2,8 @@
   if (globalThis.__autofolioReady) return;
   globalThis.__autofolioReady = true;
   let elements = new Map();
+  // Shown in the page's DevTools console (F12). Saved profile values are never logged.
+  const log = (...args) => console.info("%c[AutoFolio]", "color:#2358d0;font-weight:bold", ...args);
 
   function nearbySection(element) {
     let node = element.parentElement;
@@ -180,12 +182,23 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message.action === "scan") sendResponse({ fields: scan(), url: location.href });
+    if (message.action === "scan") {
+      const fields = scan();
+      log(`입력칸 ${fields.length}개 분석`);
+      console.table?.(fields.map(({ token, label, section, name, inputType, required }) => ({ token, label, section, name, inputType, required })));
+      sendResponse({ fields, url: location.href });
+    }
     if (message.action === "fill") {
       (async () => {
         // One at a time: search lists from different fields would otherwise overlap.
         const results = [];
-        for (const item of message.items) results.push(await fillOne(item));
+        log(`${message.items.length}개 칸 입력 시작`);
+        for (const item of message.items) {
+          const result = await fillOne(item);
+          const element = elements.get(item.token);
+          log(`${result.status.padEnd(7)} ${item.token} ${element ? labelFor(element) || element.name : ""} — ${result.detail}`);
+          results.push(result);
+        }
         // Controlled inputs can rerender after an event. Verify once more after the page settles.
         await wait(350);
         for (const result of results) {
@@ -194,11 +207,14 @@
           if (!element?.isConnected || read(element) !== result.expected) {
             result.status = "failed";
             result.detail = "입력 후 페이지 상태가 바뀌었습니다.";
+            log(`failed  ${result.token} — 재확인에서 값이 바뀜`);
           }
         }
         const invalidFields = [...document.querySelectorAll("input, textarea, select")]
           .filter(element => visible(element) && (element.getAttribute("aria-invalid") === "true" || (element.required && !element.checkValidity())))
           .map(element => labelFor(element) || element.name || "설명 없는 필수 항목");
+        const counts = results.reduce((sum, result) => ({ ...sum, [result.status]: (sum[result.status] || 0) + 1 }), {});
+        log("입력 완료", counts, invalidFields.length ? `미완료/오류 칸: ${invalidFields.join(", ")}` : "");
         sendResponse({ results, invalidFields });
       })();
       return true;
