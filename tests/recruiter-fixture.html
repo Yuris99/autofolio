@@ -175,31 +175,20 @@
           const relId = row.querySelector("[data-rel-id]").dataset.relId;
           document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
         };
-        // Two result markups: <ul><li><a> for certificates; styled <div>s with a pointer cursor for exams.
-        if (input.dataset.type === "foreignExam") {
-          const wrap = document.createElement("div");
-          wrap.className = "resultWrap";
-          for (const item of found) {
-            const div = document.createElement("div");
-            div.className = "item";
-            div.style.cursor = "pointer";
-            div.innerHTML = `<span class="name"></span><span class="code">${items.indexOf(item) + 1}</span>`;
-            div.querySelector(".name").textContent = item;
-            div.querySelector(".code").hidden = true;
-            div.addEventListener("click", () => pick(item));
-            wrap.append(div);
-          }
-          list.replaceChildren(wrap);
-          return;
-        }
+        // Markup from the real site's diagnostic log: ul.searchResultList > li > button.ellipsis > strong
+        // for certificates, and an <li> nested inside the button for exams.
         const ul = document.createElement("ul");
+        ul.className = "searchResultList";
         for (const item of found) {
           const li = document.createElement("li");
-          const link = document.createElement("a");
-          link.href = "#";
-          link.textContent = item;
-          link.addEventListener("click", clickEvent => { clickEvent.preventDefault(); pick(item); });
-          li.append(link);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "ellipsis";
+          const inner = document.createElement(input.dataset.type === "foreignExam" ? "li" : "strong");
+          inner.textContent = item;
+          button.append(inner);
+          button.addEventListener("click", () => pick(item));
+          li.append(button);
           ul.append(li);
         }
         if (!found.length) ul.innerHTML = "<li>검색결과가 없습니다.</li>";

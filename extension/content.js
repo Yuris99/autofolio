@@ -42,7 +42,9 @@
       // Skip text inside controls, and hidden text such as a result's code kept in a hidden <span>.
       acceptNode: text => {
         const parent = text.parentElement;
-        if (!parent || parent.closest(CONTROLS) || parent.closest("[hidden], [aria-hidden='true']")) return NodeFilter.FILTER_REJECT;
+        // Only controls inside the node are skipped: a result that is itself a <button> keeps its text.
+        const control = parent?.closest(CONTROLS);
+        if (!parent || (control && control !== node && node.contains(control)) || parent.closest("[hidden], [aria-hidden='true']")) return NodeFilter.FILTER_REJECT;
         return getComputedStyle(parent).display === "none" ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
       }
     });
@@ -275,6 +277,8 @@
     const usable = item => visible(item) && item.getAttribute("aria-disabled") !== "true" && textOf(item);
     const rows = [...list.querySelectorAll("[role='option'], li, tr")];
     let items = (rows.length ? rows.map(row => row.querySelector("a, button") || row) : [...list.querySelectorAll("a, button")]).filter(usable);
+    // recruiter.co.kr nests an <li> inside each result <button>; keep the outer one only.
+    items = [...new Set(items)].filter(item => !items.some(other => other !== item && other.contains(item)));
     if (items.length) return items;
     // Results built from styled <div>/<span>: the outermost elements showing a pointer cursor...
     const pointer = element => getComputedStyle(element).cursor === "pointer";
@@ -377,7 +381,9 @@
     const texts = options.map(option => textOf(option));
     const picked = pickOption(value, texts);
     if (picked.index < 0) {
-      const shown = picked.candidates.length ? ` (${picked.candidates.join(", ")})` : "";
+      // Show what the site listed, so a saved name that differs from the site's wording is easy to spot.
+      const listed = picked.candidates.length ? picked.candidates : texts.slice(0, 3);
+      const shown = listed.length ? ` (${picked.candidates.length ? "" : "결과: "}${listed.join(", ")}${!picked.candidates.length && texts.length > 3 ? " …" : ""})` : "";
       return { token: item.token, status: "review", detail: `검색 결과: ${picked.reason}${shown}. 직접 선택하세요.` };
     }
     choose(options[picked.index]);
