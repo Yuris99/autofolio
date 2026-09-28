@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>AutoFolio recruiter.co.kr 구조 검증</title>
+<!-- Markup copied from the structure of a recruiter.co.kr resume page (step 1), with made-up values.
+     Runs scan → matcher → fill end to end, as the popup would. -->
+<style>
+  .row { display: flex; gap: 8px; margin: 4px 0; } .span { display: inline-block; }
+  input.hidden { position: absolute; width: 0; height: 0; padding: 0; border: 0; opacity: 0; }
+</style>
+<script>
+  let listener;
+  window.chrome = { runtime: { onMessage: { addListener(callback) { listener = callback; }, removeListener() {} } } };
+</script>
+<form id="frm">
+<section class="writeResume" data-code="11"><header><h1 class="h1">기본정보</h1></header>
+<div class="subject"><h2 class="h2 required">지원자</h2>
+  <div class="row in-span no-margin"><div class="span per100"><span class="text">김예시</span></div></div>
+  <div class="row in-span half-margin">
+    <label class="span per15 title" for="englishName">영문이름</label>
+    <span class="span per30"><input type="text" class="text" maxlength="64" name="englishName" id="englishName" value="" required></span>
+    <label class="span per20 devider title" for="chineseName">한문이름</label>
+    <span class="span per35"><input type="text" maxlength="32" class="text" name="chineseName" id="chineseName" value="" required></span>
+  </div>
+  <div class="row in-span half-margin">
+    <label class="span per15 title" for="genderFlag">성별</label>
+    <div class="span per30 radio">
+      <label><input type="radio" name="genderFlag" value="M" required id="genderFlag"><span class="label">남</span></label>
+      <label><input type="radio" name="genderFlag" value="F" required><span class="label">여</span></label>
+    </div>
+    <label class="span per20 devider title" for="birthday">생년월일</label>
+    <span class="span per20"><input type="text" data-dates="birthday:YMD" class="text date" name="birthday" id="birthday" value="" required></span>
+  </div>
+</div>
+<div class="subject"><h2 class="h2 required">지원분야</h2>
+  <div class="row in-span no-margin">
+    <label class="span per25 select"><select name="applySector[0].depth0" required><option value="">법인</option><option value="">-----</option><option value="1">예시법인</option></select></label>
+  </div>
+</div>
+<div class="subject"><h2 class="h2 required">연봉</h2>
+  <div class="row in-span no-margin">
+    <label class="span per15 title" for="hopeSalary">희망연봉</label>
+    <span class="span per30 label money"><input type="number" class="text" name="hopeSalary" id="hopeSalary" value="" required></span>
+  </div>
+</div>
+<div class="subject"><h2 class="h2">입사관련</h2>
+  <div class="row in-span no-margin">
+    <label class="span per20 title" for="joinPossibleDate">입사가능일자</label>
+    <span class="span per20"><input type="text" data-dates="joinPossibleDate:YMD future" class="text date" name="joinPossibleDate" id="joinPossibleDate" value=""></span>
+  </div>
+</div>
+<div class="subject"><h2 class="h2">추천인</h2>
+  <div class="row in-span no-margin">
+    <label class="span per15 title" for="recommender.name">성명</label>
+    <span class="span per25"><input type="text" class="text" name="recommender.name" id="recommender.name" maxlength="32" value=""></span>
+  </div>
+  <div class="row in-span half-margin">
+    <label class="span per15 title" for="recommender.contact">추천인 연락처</label>
+    <div class="span per35 middle-set"><input type="text" name="recommender.contact" id="recommender.contact" value="" class="text"></div>
+  </div>
+</div>
+</section>
+<section class="writeResume" data-code="13"><header><h1 class="h1">인적사항</h1></header>
+<div class="subject"><h2 class="h2">국적</h2>
+  <div class="row in-span no-margin">
+    <label class="span per35 select"><select name="nationality" title="국적">
+      <option value="">국가를 선택하세요.</option><option value="GH">가나</option><option value="KR">대한민국</option><option value="US">미국</option>
+    </select></label>
+  </div>
+</div>
+<div class="subject"><h2 class="h2 required">주소</h2>
+  <div data-row="address" class="row in-span no-margin address">
+    <label class="span per15 title" for="">현주소</label>
+    <div class="span per85">
+      <div class="row in-span no-margin"><div class="span per100 addresszipcode">
+        <button type="button" class="btn btn-add">우편번호</button><span class="postCode"></span>
+        <input type="text" class="hidden" required name="currentAddress.zipCode" maxlength="126" value="" title="우편번호">
+      </div></div>
+      <div class="row in-span half-margin">
+        <div class="span per40"><label><input type="text" required name="currentAddress.address" maxlength="128" value="" class="text" title="주소" readonly></label></div>
+        <div class="span per60"><input type="text" required name="currentAddress.detailAddress" maxlength="128" value="" class="text" title="상세 주소"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="subject"><h2 class="h2 required">병역사항</h2>
+  <div class="row in-span no-margin">
+    <label class="span per15 title">병역구분</label>
+    <div class="span per50 radio">
+      <label><input type="radio" name="military.militaryTypeCode" id="militaryType" value="00" required><span class="label">비대상</span></label>
+      <label><input type="radio" name="military.militaryTypeCode" value="01" required><span class="label">군필</span></label>
+      <label><input type="radio" name="military.militaryTypeCode" value="02" required><span class="label">미필</span></label>
+      <label><input type="radio" name="military.militaryTypeCode" value="03" required><span class="label">면제</span></label>
+    </div>
+  </div>
+  <div class="row in-span half-margin">
+    <label class="span per15 title">계급</label>
+    <label class="span per25 select"><select name="military.militaryPositionCode" required>
+      <option value="">계급을 선택하세요.</option><option value="01">이병</option><option value="02">일병</option><option value="03">상병</option><option value="04">병장</option><option value="05">하사</option>
+    </select></label>
+    <label class="span per20 title devider">복무기간</label>
+    <label class="span per35 date">
+      <input type="text" data-dates="military.militaryDate:YM" name="military.militaryStartDate" value="" required class="text date start" title="시작일">
+      <input type="text" data-dates="military.militaryDate:END" name="military.militaryEndDate" value="" required class="text date end" title="종료일">
+    </label>
+  </div>
+  <div class="row in-span half-margin">
+    <label class="span per15 title">제대구분</label>
+    <label class="span per25 select"><select name="military.militaryDischargeCode" required>
+      <option value="">제대구분을 선택하세요.</option><option value="01">만기제대</option><option value="02">소집해제</option><option value="99">직접입력</option>
+    </select></label>
+  </div>
+</div>
+</section>
+</form>
+<script src="../extension/option-match.js"></script>
+<script src="../extension/content.js"></script>
+<script type="module">
+  import { allValues, classify } from "../extension/matcher.js";
+  const profile = {
+    personal: { name: "김예시", englishName: "KIM YESI", chineseName: "金例示", gender: "여", birthDate: "1999.01.31",
+      nationality: "대한민국", zipCode: "04524", address: "서울특별시 중구 세종대로 110", addressDetail: "1층", email: "yesi@example.com" },
+    military: { status: "군필", rank: "병장", startDate: "2019.03", endDate: "2020.09", discharge: "만기제대" }
+  };
+  let scan;
+  listener({ action: "scan" }, null, response => { scan = response; });
+  const types = Object.fromEntries(scan.fields.map(field => [field.name, classify(field).type]));
+  const values = allValues(profile);
+  const items = scan.fields.map(field => ({ token: field.token, value: values.find(item => item.type === types[field.name])?.value }))
+    .filter(item => item.value);
+  const byName = Object.fromEntries(scan.fields.map(field => [field.name, field]));
+
+  listener({ action: "fill", items }, null, response => {
+    const status = Object.fromEntries(response.results.map(result => [scan.fields.find(field => field.token === result.token).name, result.status]));
+    const value = name => document.querySelector(`[name="${name}"]`).value;
+    const checked = name => document.querySelector(`[name="${name}"]:checked`)?.value;
+    const checks = {
+      labelsFromRowTitles: byName["military.militaryPositionCode"]?.label === "계급" && byName.nationality?.label === "국적",
+      genderIsOneQuestion: byName.genderFlag?.label === "성별" && scan.fields.filter(field => field.name === "genderFlag").length === 1,
+      genderChoices: byName.genderFlag?.options.map(option => option.text).join() === "남,여",
+      sectionsAreHeadings: byName["recommender.name"]?.section === "추천인" && byName.englishName?.section === "지원자",
+      hiddenZipNotScanned: !byName["currentAddress.zipCode"],
+      notForRecommender: types["recommender.name"] === null && types["recommender.contact"] === null && !value("recommender.name"),
+      perApplicationLeftEmpty: types.hopeSalary === null && types.joinPossibleDate === null && types["applySector[0].depth0"] === null,
+      englishName: value("englishName") === "KIM YESI",
+      chineseName: value("chineseName") === "金例示",
+      gender: checked("genderFlag") === "F",
+      birthday: value("birthday") === "1999.01.31",
+      nationality: value("nationality") === "KR",
+      readonlyAddressLeftToUser: status["currentAddress.address"] === "review" && !value("currentAddress.address"),
+      addressDetail: value("currentAddress.detailAddress") === "1층",
+      military: checked("military.militaryTypeCode") === "01" && value("military.militaryPositionCode") === "04" &&
+        value("military.militaryStartDate") === "2019.03" && value("military.militaryEndDate") === "2020.09" &&
+        value("military.militaryDischargeCode") === "01"
+    };
+    const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
+    document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
+    document.body.dataset.testDetails = JSON.stringify({ failed, types, results: response.results.map(r => [r.token, r.status, r.detail]) });
+  });
+</script>
+</html>

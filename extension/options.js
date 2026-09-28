@@ -26,7 +26,7 @@ function entry(list, fields, data = {}) {
   remove.type = "button";
   remove.className = "secondary";
   remove.textContent = "삭제";
-  remove.addEventListener("click", () => { wrapper.remove(); saved.textContent = "저장하지 않은 변경이 있습니다."; });
+  remove.addEventListener("click", () => { wrapper.remove(); autosave(); });
   wrapper.append(grid, remove);
   list.append(wrapper);
 }
@@ -69,10 +69,21 @@ function readForm() {
   return cleanProfile(profile);
 }
 
-form.addEventListener("input", () => { saved.textContent = "저장하지 않은 변경이 있습니다."; });
+// Typing saves on its own; the button is there for reassurance and saves immediately.
+let saveTimer;
+function autosave() {
+  saved.textContent = "저장 중…";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    await chrome.storage.local.set({ profile: readForm() });
+    saved.textContent = `자동 저장됨 ${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
+  }, 600);
+}
+form.addEventListener("input", autosave);
 
 form.addEventListener("submit", async event => {
   event.preventDefault();
+  clearTimeout(saveTimer);
   const profile = readForm();
   await chrome.storage.local.set({ profile });
   render(profile);
@@ -108,3 +119,5 @@ importFile.addEventListener("change", async () => {
 
 const { profile = {} } = await chrome.storage.local.get("profile");
 render(profile);
+const version = chrome.runtime?.getManifest?.().version;
+if (version) document.getElementById("version").textContent = `v${version}`;

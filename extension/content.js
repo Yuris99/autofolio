@@ -1,17 +1,33 @@
 (() => {
-  if (globalThis.__autofolioReady) return;
-  globalThis.__autofolioReady = true;
+  // Injected again on every analysis. Replace the previous copy's listener instead of skipping,
+  // so a tab opened before an extension update still gets the new code.
+  if (globalThis.__autofolioListener) {
+    try { chrome.runtime.onMessage.removeListener(globalThis.__autofolioListener); } catch { /* old context is gone */ }
+  }
   let elements = new Map();
   // Shown in the page's DevTools console (F12). Saved profile values are never logged.
   const log = (...args) => console.info("%c[AutoFolio]", "color:#2358d0;font-weight:bold", ...args);
 
+  // The group heading (h2 "추천인", legend "학력"), not the row title beside the input.
+  const HEADINGS = ":scope > legend, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > .section-title, :scope > header";
   function nearbySection(element) {
     let node = element.parentElement;
-    for (let depth = 0; node && depth < 5; depth++, node = node.parentElement) {
-      const heading = node.querySelector(":scope > legend, :scope > h2, :scope > h3, :scope > h4, :scope > .title, :scope > .section-title");
-      const text = textOf(heading).slice(0, 100);
+    for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+      const text = textOf(node.querySelector(HEADINGS)).slice(0, 100);
       if (text) return text;
       if (node.matches("fieldset") && node.getAttribute("aria-label")) return node.getAttribute("aria-label");
+    }
+    return "";
+  }
+
+  // A row title placed before the input's wrapper: <label class="title">계급</label><label class="select"><select>.
+  function rowTitle(element) {
+    let node = element;
+    for (let depth = 0; node && depth < 3; depth++, node = node.parentElement) {
+      for (let sibling = node.previousElementSibling; sibling; sibling = sibling.previousElementSibling) {
+        if (sibling.matches("th, dt, .title, label") && !sibling.querySelector(CONTROLS)) return textOf(sibling);
+        if (sibling.querySelector("input, select, textarea")) break;
+      }
     }
     return "";
   }
@@ -38,7 +54,12 @@
     if (labelledBy) return labelledBy.split(/\s+/).map(id => textOf(document.getElementById(id))).filter(Boolean).join(" ").slice(0, 120);
     const container = element.closest("td, dd, li, .form-group, .field, .input-group");
     const heading = container?.previousElementSibling?.matches("th, dt, .title, .label") ? container.previousElementSibling : null;
-    return textOf(container?.querySelector("label, th, .label")) || textOf(heading);
+    return textOf(container?.querySelector("label, th, .label")) || textOf(heading) || rowTitle(element) || element.title.trim();
+  }
+
+  // The text of one radio choice ("남"), not the question label that may also point at it.
+  function choiceText(radio) {
+    return textOf(radio.closest("label")) || labelFor(radio) || radio.value;
   }
 
   // One field per radio group: its question, not any single choice, is what gets classified.
@@ -68,7 +89,7 @@
 
   function chooseRadio(element, value) {
     const radios = radioGroup(element);
-    const texts = radios.map(radio => labelFor(radio) || radio.value);
+    const texts = radios.map(choiceText);
     let picked = globalThis.AutoFolioMatch.pickOption(value, texts);
     if (picked.index < 0) picked = globalThis.AutoFolioMatch.pickOption(value, radios.map(radio => radio.value));
     if (picked.index < 0) return { radio: null, detail: `선택지에서 "${value}"를 찾지 못했습니다 (${texts.join(", ")}).` };
@@ -78,7 +99,14 @@
   function visible(element) {
     if (element.getAttribute("aria-hidden") === "true" || element.disabled || element.closest("[hidden], [inert]")) return false;
     const style = getComputedStyle(element);
-    return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
+    if (style.display === "none" || style.visibility === "hidden" || !element.getClientRects().length) return false;
+    // Text boxes shrunk or faded out are data stores for widgets (e.g. a zip code set by an address search).
+    // Radios and checkboxes are often hidden this way behind styled labels, so they stay.
+    if (!(element instanceof HTMLInputElement && ["radio", "checkbox"].includes(element.type))) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2 || Number(style.opacity) === 0 || element.classList.contains("hidden")) return false;
+    }
+    return true;
   }
 
   function scan() {
@@ -98,12 +126,13 @@
       const section = nearbySection(element);
       let options = [];
       if (element instanceof HTMLSelectElement) options = [...element.options].map(o => ({ value: o.value, text: o.text.trim() }));
-      if (radios) options = radios.map(radio => ({ value: radio.value, text: labelFor(radio) }));
+      if (radios) options = radios.map(radio => ({ value: radio.value, text: choiceText(radio) }));
       fields.push({
         token,
         label: radios ? groupLabel(element) : labelFor(element),
         ariaLabel: element.getAttribute("aria-label") || "",
         placeholder: element.getAttribute("placeholder") || "",
+        title: element.getAttribute("title") || "",
         section,
         name: element.getAttribute("name") || "",
         id: element.id || "",
@@ -202,10 +231,15 @@
     const digits = value.replace(/\D/g, "");
     if (element.type === "date" && digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
     if (element.type === "month" && digits.length >= 6) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}`;
-    // Text date boxes: follow the format the page hints at (placeholder "YYYY.MM.DD", maxlength 8, ...).
+    // Text date boxes: follow the format the page hints at (placeholder "YYYY.MM.DD", a date
+    // already in the box, recruiter.co.kr's data-dates="birthday:YMD", maxlength 8, ...).
     const looksLikeDate = /^\d{4}\D?\d{2}(\D?\d{2})?\D?$/.test(value.trim());
     if (element.type === "text" && looksLikeDate) {
-      const hint = `${element.placeholder} ${element.title} ${element.dataset.format || ""}`;
+      const current = element.value.trim().match(/^\d{4}(\D)\d{2}(?:(\D)\d{2})?$/);
+      const dates = (element.dataset.dates || "").match(/:(YMD|YM)\b/);
+      const hint = [element.placeholder, element.title, element.dataset.format || "",
+        current ? `yyyy${current[1]}mm${current[2] ? `${current[2]}dd` : ""}` : "",
+        dates ? (dates[1] === "YMD" ? "yyyy.mm.dd" : "yyyy.mm") : ""].join(" ");
       const format = hint.match(/y{4}(\W?)m{2}(?:(\W?)d{2})?/i);
       if (format) {
         const [, first, second = ""] = format;
@@ -224,6 +258,9 @@
     const value = String(item.value ?? "").trim();
     if (!value) return { token: item.token, status: "skipped", detail: "저장된 값 없음" };
     try {
+      if (element.readOnly) {
+        return { token: item.token, status: "review", detail: "읽기 전용 칸입니다. 옆의 검색 버튼(예: 우편번호)으로 입력하세요." };
+      }
       if (isSearchInput(element)) return await fillSearch(item, element, value);
       let expected = formattedValue(element, value);
       if (element instanceof HTMLSelectElement) {
@@ -246,7 +283,7 @@
         if (!radio) return { token: item.token, status: "review", detail };
         if (!radio.checked) radio.click();
         const ok = radio.checked;
-        return { token: item.token, status: ok ? "filled" : "failed", detail: ok ? `"${labelFor(radio) || radio.value}" 선택` : "선택되지 않았습니다.", expected: radio.value };
+        return { token: item.token, status: ok ? "filled" : "failed", detail: ok ? `"${choiceText(radio)}" 선택` : "선택되지 않았습니다.", expected: radio.value };
       } else if (element instanceof HTMLInputElement && element.type === "checkbox") {
         if (element.value !== value && labelFor(element) !== value) return { token: item.token, status: "skipped", detail: "선택 항목과 값이 다릅니다." };
         if (!element.checked) element.click();
@@ -264,7 +301,7 @@
     }
   }
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  function onMessage(message, _sender, sendResponse) {
     if (message.action === "scan") {
       const fields = scan();
       log(`입력칸 ${fields.length}개 분석`);
@@ -295,7 +332,8 @@
         }
         const invalidFields = [...document.querySelectorAll("input, textarea, select")]
           .filter(element => visible(element) && (element.getAttribute("aria-invalid") === "true" || (element.required && !element.checkValidity())))
-          .map(element => labelFor(element) || element.name || "설명 없는 필수 항목");
+          .map(element => labelFor(element) || element.name || "설명 없는 필수 항목")
+          .filter((label, index, all) => all.indexOf(label) === index);
         const counts = results.reduce((sum, result) => ({ ...sum, [result.status]: (sum[result.status] || 0) + 1 }), {});
         log("입력 완료", counts, invalidFields.length ? `미완료/오류 칸: ${invalidFields.join(", ")}` : "");
         sendResponse({ results, invalidFields });
@@ -303,5 +341,7 @@
       return true;
     }
     return false;
-  });
+  }
+  globalThis.__autofolioListener = onMessage;
+  chrome.runtime.onMessage.addListener(onMessage);
 })();

@@ -44,6 +44,13 @@
   checks.push(["removed entry gone", store.profile.certificate?.length === 0]);
   checks.push(["name kept", store.profile.personal?.name === "홍길동"]);
   checks.push(["status shown", document.getElementById("saved").textContent === "저장했습니다."]);
+  // Typing alone saves, without pressing the button.
+  const english = group("personal").querySelector('[name="englishName"]');
+  english.value = "HONG GILDONG";
+  english.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise(resolve => setTimeout(resolve, 900));
+  checks.push(["autosaved", store.profile.personal?.englishName === "HONG GILDONG"]);
+  checks.push(["autosave status", document.getElementById("saved").textContent.startsWith("자동 저장됨")]);
   const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
   document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
   document.body.dataset.testDetails = JSON.stringify(failed);

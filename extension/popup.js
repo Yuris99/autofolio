@@ -198,3 +198,4 @@ document.getElementById("clearLog").addEventListener("click", async () => {
 const { useLaya = false, runLog = [] } = await chrome.storage.local.get(["useLaya", "runLog"]);
 layaToggle.checked = useLaya;
 showLogSummary(runLog);
+document.getElementById("version").textContent = `v${chrome.runtime.getManifest().version}`;

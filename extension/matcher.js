@@ -143,7 +143,8 @@ function infer(label, context, internal) {
 }
 
 export function classify(field) {
-  const label = [field.label, field.placeholder, field.ariaLabel].filter(Boolean).join(" ").trim();
+  // title is often the only thing telling apart two inputs under one row title ("복무기간": 시작일 / 종료일).
+  const label = [...new Set([field.label, field.placeholder, field.ariaLabel, field.title].filter(Boolean))].join(" ").trim();
   const internal = [splitName(field.name), splitName(field.id)].filter(Boolean).join(" ");
   const context = [field.section, field.name, field.id].filter(Boolean).join(" ");
   if (!label && !context) return { type: null, reason: "필드 설명 없음" };
