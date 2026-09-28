@@ -181,8 +181,7 @@
           row.querySelector(".searchResultName").textContent = item;
           input.value = "";
           list.replaceChildren();
-          // The code is set silently; the linked fields open only when the code input reports a
-          // change (like the site's linkedForm), which a script-driven click alone does not do.
+          afterPick();
         };
         // Markup from the real site's diagnostic log: ul.searchResultList > li > button.ellipsis > strong
         // for certificates, and an <li> nested inside the button for exams.
@@ -206,14 +205,19 @@
     });
   }
   document.addEventListener("click", event => event.target.closest(".search label")?.closest(".search").classList.add("open"));
-  // linkedForm-like: a change on a [data-rel-id] input enables the fields that name it.
-  document.addEventListener("change", event => {
-    const relId = event.target.dataset?.relId;
-    // Like the real site: only the newest "+" certificate row reacts to a pick, and the exam row
-    // never opens its fields by itself, so AutoFolio's fallback has to open the rest.
-    const newest = [...document.querySelectorAll('[data-loop="license"] [data-rel-id]')].at(-1)?.dataset.relId;
-    if (relId && relId === newest && event.target.value) document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
+  // Like the real site: a pick asks the server for details and, when the reply comes
+  // (1.5 s, a slow network) opens the linked fields of the row the page thinks is current, the one whose search box was
+  // used last. Moving on to the next search before the reply opens the wrong row.
+  let currentRow = null;
+  document.addEventListener("focusin", event => {
+    if (event.target.matches?.("input[type='search']")) currentRow = event.target.closest("[data-loop]");
   });
+  function afterPick() {
+    setTimeout(() => {
+      const relId = currentRow?.querySelector("[data-rel-id]")?.dataset.relId;
+      if (relId) document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
+    }, 1500);
+  }
   const searchItems = { foreignExam: ["TOEIC", "TOEIC Speaking", "TOEFL iBT"], license: ["정보처리기사", "정보처리산업기사", "정보처리기능사", "SQL개발자", "SQL전문가"] };
   for (const input of document.querySelectorAll("input[type='search']")) recruiterSearch(input, searchItems[input.dataset.type]);
 

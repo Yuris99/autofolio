@@ -6,6 +6,13 @@
   if (window.__autofolioBridge) return;
   window.__autofolioBridge = true;
   document.documentElement.dataset.autofolioBridge = "1";
+  // Record when the page opens a window (e.g. a YBM login for TOEIC score lookup), so the
+  // content script can stop and hand that step to the user.
+  const open = window.open;
+  window.open = function (...args) {
+    document.documentElement.dataset.autofolioPopupAt = String(Date.now());
+    return open.apply(this, args);
+  };
   document.addEventListener("autofolio:enter", event => {
     const target = event.target;
     for (const type of ["keydown", "keypress", "keyup"]) {

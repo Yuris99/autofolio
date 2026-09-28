@@ -50,3 +50,4 @@ async function runFixture(name) {
 test("fixture form is filled and search boxes are resolved in a browser", { skip }, () => runFixture("form-fixture.html"));
 test("profile page renders, adds, removes and saves entries", { skip }, () => runFixture("options-fixture.html"));
 test("recruiter.co.kr-shaped form is classified and filled end to end", { skip }, () => runFixture("recruiter-fixture.html"));
+test("a pick that opens a login window is handed to the user", { skip }, () => runFixture("login-fixture.html"));

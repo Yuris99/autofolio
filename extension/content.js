@@ -353,6 +353,34 @@
     await wait(300);
   }
 
+  // A pick that asks for a login: the page opened a window (seen by page-bridge.js), or a password
+  // field or a frame (a login layer) appeared that was not there before.
+  function loginSignals() {
+    return new Set([...document.querySelectorAll("input[type='password'], iframe")].filter(node => node.getClientRects().length));
+  }
+  function loginOpened(before, since) {
+    if (Number(document.documentElement.dataset.autofolioPopupAt || 0) >= since) return true;
+    return [...loginSignals()].some(node => !before.has(node));
+  }
+
+  function linkedFields(row) {
+    return [...row.querySelectorAll("[data-rel-id]")].flatMap(source => source.dataset.relId
+      ? [...document.querySelectorAll(`[data-rel-target="${CSS.escape(source.dataset.relId)}"]`)] : []);
+  }
+
+  // True once every field linked to the row is enabled (or the row has none).
+  async function waitForLinkedFields(row, ms) {
+    for (let waited = 0; ; waited += 150) {
+      const fields = linkedFields(row);
+      if (!fields.some(field => field.disabled)) {
+        if (fields.length) await wait(200);
+        return true;
+      }
+      if (waited >= ms) return false;
+      await wait(150);
+    }
+  }
+
   // Fallback when the page did not react to a pick it shows: open the fields the page itself marks
   // as belonging to it (data-rel-target naming the row's data-rel-id). On recruiter.co.kr only the
   // newest "+" row reacts to picks, so rows added earlier stay locked after a successful pick.
@@ -461,14 +489,23 @@
     }
     const row = loopRow(element) || element.closest(".row, li, tr, .field, .form-group") || element.parentElement;
     const before = new Map([...row.querySelectorAll("input")].map(input => [input, input.value]));
+    const loginBefore = loginSignals();
+    const pickedAt = Date.now();
     choose(options[picked.index]);
     await wait(300);
+    if (loginOpened(loginBefore, pickedAt)) {
+      log(`로그인 창이 열려 멈춤: ${texts[picked.index]}`);
+      return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 고르자 로그인 창이 열렸습니다(예: YBM 성적 조회). 직접 로그인하면 사이트가 성적을 불러옵니다. AutoFolio는 로그인 정보를 입력하지 않고 이 줄은 채우지 않습니다.` };
+    }
     await finishPick(element, options[picked.index], before);
     const stillOpen = visibleOptions(element).some(option => options.includes(option));
     if (!stillOpen && (shownNearby(element, texts[picked.index]) || normalize(read(element)) === normalize(value))) {
       // The box itself may be cleared after a pick, so the settle-time recheck is skipped (no expected).
       const check = picked.loose ? " · 비슷한 이름으로 골랐으니 확인하세요" : "";
-      const opened = await openLinkedFields(row);
+      // Let the page finish its reaction (often a server round trip) before the next search starts;
+      // moving on too early made it open the wrong row, or none, depending on network speed.
+      const settled = await waitForLinkedFields(row, 4000);
+      const opened = settled ? 0 : await openLinkedFields(row);
       const lockedNote = opened ? ` · 사이트가 열지 않은 세부 칸 ${opened}개를 직접 열었음` : "";
       return { token: item.token, status: "filled", detail: `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}${check}${lockedNote}` };
     }

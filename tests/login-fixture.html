@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>AutoFolio 로그인 창 검증</title>
+<!-- Picking "Toeic Speaking test" opens a login window, like recruiter.co.kr's YBM score lookup.
+     AutoFolio must stop there: report it, and neither unlock nor fill the row. -->
+<script>
+  let listener;
+  window.chrome = { runtime: { onMessage: { addListener(callback) { listener = callback; }, removeListener() {} } } };
+</script>
+<section><h2>공인외국어시험</h2>
+  <div class="row loop" data-loop="languageExam">
+    <div class="search"><label><input type="search" placeholder="키워드 입력 후 &quot;Enter&quot;로 검색"><span>시험검색</span></label><div class="searchResult"></div></div>
+    <input type="hidden" name="languageExam[0].languageExamName"><span class="searchResultName"></span>
+    <input type="text" class="hidden" name="languageExam[0].languageExamCode" data-rel-id="languageExam[0]" style="position:absolute;width:0;height:0;opacity:0">
+    <label>취득점수 <input name="languageExam[0].score" data-rel-target="languageExam[0]" disabled></label>
+  </div>
+</section>
+<script>
+  const input = document.querySelector("input[type='search']");
+  const row = input.closest(".row");
+  input.addEventListener("keydown", event => {
+    if (event.keyCode !== 13) return;
+    setTimeout(() => {
+      const list = row.querySelector(".searchResult");
+      list.innerHTML = '<ul class="searchResultList"><li><button type="button" class="ellipsis"><li>Toeic Speaking test</li></button></li></ul>';
+      list.querySelector("button").addEventListener("click", () => {
+        row.querySelector('[name$="ExamName"]').value = "Toeic Speaking test";
+        row.querySelector(".searchResultName").textContent = "Toeic Speaking test";
+        list.replaceChildren();
+        window.open("about:blank", "ybmLogin", "width=400,height=500");
+      });
+    }, 200);
+  });
+</script>
+<script src="../extension/page-bridge.js"></script>
+<script src="../extension/option-match.js"></script>
+<script src="../extension/content.js"></script>
+<script type="module">
+  const send = message => new Promise(resolve => listener(message, null, resolve));
+  const { fields } = await send({ action: "scan" });
+  const box = fields.find(field => field.inputType === "search");
+  const { results } = await send({ action: "fill", items: [{ token: box.token, value: "토익스피킹" }] });
+  const [result] = results;
+  const checks = {
+    stoppedForLogin: result.status === "review" && /로그인/.test(result.detail),
+    rowLeftLocked: document.querySelector('[name="languageExam[0].score"]').disabled
+  };
+  const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
+  document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
+  document.body.dataset.testDetails = JSON.stringify({ failed, result });
+</script>
+</html>
