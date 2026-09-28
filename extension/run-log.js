@@ -22,7 +22,8 @@ export function createRun(url, fields, suggestions, now = new Date()) {
       return {
         token: field.token, label: field.label || field.ariaLabel || field.placeholder || "", section: field.section,
         name: field.name, inputType: field.inputType, required: field.required,
-        optionCount: field.options?.length || 0, suggested: suggestion.type || null, reason: suggestion.reason || ""
+        optionCount: field.options?.length || 0, suggested: suggestion.type || null, reason: suggestion.reason || "",
+        loop: field.loop || null
       };
     }),
     notes: [],

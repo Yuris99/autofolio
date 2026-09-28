@@ -8,6 +8,11 @@
   .row { display: flex; gap: 8px; margin: 4px 0; } .span { display: inline-block; }
   input.hidden { position: absolute; width: 0; height: 0; padding: 0; border: 0; opacity: 0; }
   .btn-icon { width: 20px; height: 20px; }
+  /* The site shows only the "자격증검색" label; the input opens on click. Both ways of hiding it: */
+  .search input[data-type="license"] { width: 0; padding: 0; border: 0; opacity: 0; }
+  .search input[data-type="license"]:focus { width: 200px; opacity: 1; }
+  .search input[data-type="foreignExam"] { display: none; }
+  .search.open input[data-type="foreignExam"] { display: inline-block; }
 </style>
 <script>
   let listener;
@@ -185,6 +190,7 @@
       }, 250);
     });
   }
+  document.addEventListener("click", event => event.target.closest(".search label")?.closest(".search").classList.add("open"));
   const searchItems = { foreignExam: ["TOEIC", "TOEIC Speaking", "TOEFL iBT"], license: ["정보처리기사", "정보처리산업기사", "정보처리기능사", "SQLD", "SQLP"] };
   for (const input of document.querySelectorAll("input[type='search']")) recruiterSearch(input, searchItems[input.dataset.type]);
 

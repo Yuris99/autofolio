@@ -157,9 +157,26 @@
     return true;
   }
 
+  // A search box collapsed behind its visible label ("자격증검색") that opens when clicked.
+  // recruiter.co.kr shows only the label; the input is shrunk or hidden until then.
+  function collapsedSearch(element) {
+    if (!isSearchInput(element) || element.disabled || element.closest("[hidden], [inert]")) return false;
+    const holder = element.closest("label") || element.parentElement;
+    return Boolean(holder?.getClientRects().length && getComputedStyle(holder).visibility !== "hidden" && textOf(holder));
+  }
+
   function isField(element) {
     const inputType = element instanceof HTMLInputElement ? element.type : element.localName;
-    return visible(element) && !["hidden", "password", "file", "submit", "button", "reset", "image", "color", "range"].includes(inputType);
+    return (visible(element) || collapsedSearch(element)) && !["hidden", "password", "file", "submit", "button", "reset", "image", "color", "range"].includes(inputType);
+  }
+
+  // Open a collapsed search box the way a person would: click its label, then focus it.
+  async function openSearch(element) {
+    if (!visible(element)) {
+      (element.closest("label") || element.parentElement)?.click();
+      await wait(250);
+    }
+    element.focus();
   }
 
   // Fields visible now, counting a radio group once, without replacing the scanned tokens.
@@ -318,6 +335,7 @@
     }
 
     // Suggest-as-you-type lists appear on input; "type, then Enter" boxes need the key.
+    await openSearch(element);
     typeInto(element, value);
     const needsEnter = /enter|엔터/i.test(`${element.placeholder} ${element.title}`);
     let options = await waitForOptions(element, needsEnter ? 300 : 1200);
