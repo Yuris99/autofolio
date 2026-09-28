@@ -15,7 +15,7 @@ export const PROFILE_SCHEMA = [
   { group: "certificate", label: "자격증", title: "name",
     fields: { name: "자격증명", obtainedDate: "취득일", issuer: "발급기관", number: "자격증 번호" } },
   { group: "language", label: "어학", title: "test",
-    fields: { test: "시험명", score: "점수·등급", obtainedDate: "취득일" } },
+    fields: { test: "시험명", score: "점수·등급", obtainedDate: "취득일", number: "수험번호" } },
   { group: "award", label: "수상", title: "title",
     fields: { title: "수상명", issuer: "수여기관", date: "수상일" } },
   { group: "activity", label: "활동·경험", title: "name",
@@ -65,6 +65,7 @@ const RULES = [
   ["certificate.number", /자격.?번호|자격증.?번호|면허.?번호|license.?(number|no)/i],
   ["language.test", /어학.?시험|시험.?명|시험.?종류|toeic|toefl|opic|teps|토익|토플|오픽|텝스|jlpt|hsk/i],
   ["language.score", /어학.?점수|어학.?성적|어학.?등급/i],
+  ["language.number", /수험.?번호|응시.?번호/i],
   ["award.title", /수상.?명|수상.?내역|수상.?경력/i],
   ["project.name", /프로젝트.?명/i],
   ["activity.name", /활동.?명/i],
@@ -81,7 +82,8 @@ const SECTION_RULES = [
     ["military.discharge", /제대|전역|discharge/i], ["military.rank", /계급|rank|position/i],
     ["military.branch", /군별|branch|kind/i], ["military.status", /구분|여부|type|status/i]]],
   [/어학|외국어|language/i, [
-    ["language.obtainedDate", /취득|응시|일자|날짜/], ["language.score", /점수|등급|성적|급수/], ["language.test", /시험|종류|어학|명/]]],
+    ["language.number", /번호/], ["language.obtainedDate", /취득|응시|일자|날짜/], ["language.score", /점수|등급|성적|급수|레벨|level/i],
+    ["language.test", /시험|종류|어학|명/]]],
   [/수상|award/i, [
     ["award.date", /일자|날짜|수상.?일|연월/], ["award.issuer", /기관|수여|주최/], ["award.title", /수상|명|내역|제목/]]],
   [/프로젝트|project/i, [

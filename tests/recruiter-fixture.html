@@ -127,6 +127,15 @@
       <div class="search"><label><input type="search" class="text" data-type="foreignExam" placeholder="키워드 입력 후 &quot;Enter&quot;로 검색"><span class="label">시험검색</span></label><div class="searchResult"></div></div>
       <input type="hidden" name="languageExam[0].languageExamName" value=""><span class="searchResultName"></span>
       <input type="text" name="languageExam[0].languageExamCode" value="" class="hidden" data-rel-id="languageExam[0]" title="시험 코드">
+      <!-- Opens once an exam is picked, like the site's data-template="detail" row. -->
+      <div class="row in-span half-margin" data-template="detail">
+        <label class="span per15 title">점수</label>
+        <span class="span per20"><input type="text" class="text" name="languageExam[0].score" title="점수" data-rel-target="languageExam[0]" disabled></span>
+        <label class="span per15 title devider">응시일자</label>
+        <span class="span per20"><input type="text" data-dates="languageExam[0].examDate:YMD" class="text date" name="languageExam[0].examDate" title="응시일자" data-rel-target="languageExam[0]" disabled></span>
+        <label class="span per15 title devider">수험번호</label>
+        <span class="span per15"><input type="text" class="text" name="languageExam[0].registNumber" title="수험번호" data-rel-target="languageExam[0]" disabled></span>
+      </div>
     </div>
   </div>
 </div>
@@ -223,12 +232,12 @@
 <script src="../extension/content.js"></script>
 <script type="module">
   import { allValues, classify } from "../extension/matcher.js";
-  import { defaultChoice, rowsToAdd } from "../extension/plan.js";
+  import { defaultChoice, fieldId, followUpItems, rowsToAdd } from "../extension/plan.js";
   const profile = {
     personal: { name: "김예시", englishName: "KIM YESI", chineseName: "金例示", gender: "여", birthDate: "1999.01.31",
       nationality: "대한민국", zipCode: "04524", address: "서울특별시 중구 세종대로 110", addressDetail: "1층", email: "yesi@example.com" },
     military: { status: "군필", rank: "병장", startDate: "2019.03", endDate: "2020.09", discharge: "만기제대" },
-    language: [{ test: "TOEIC", score: "900", obtainedDate: "2025.03.01" }],
+    language: [{ test: "TOEIC", score: "900", obtainedDate: "2025.03.01", number: "000123456" }],
     certificate: [
       { name: "정보처리기사", obtainedDate: "20230602", issuer: "한국산업인력공단", number: "23201012345A" },
       { name: "SQLD", obtainedDate: "2024.04.05", issuer: "한국데이터산업진흥원", number: "SQLD-054001234" }
@@ -259,10 +268,11 @@
   const value = name => document.querySelector(`[name="${name}"]`)?.value;
   const checked = name => document.querySelector(`[name="${name}"]:checked`)?.value;
 
-  // Second pass: each certificate pick enabled its row's issuer, number and date fields.
+  // Follow-up round, as the popup does after a fill: picks enabled the certificates' issuer, number
+  // and date fields and the exam's score, date and number.
   const second = await send({ action: "scan" });
-  const opened = plan(second.fields).filter(entry => /^license\[\d\]\./.test(entry.field.name) && entry.value);
-  const secondResponse = await send({ action: "fill", items: opened.map(entry => ({ token: entry.field.token, value: entry.value })) });
+  const opened = followUpItems(new Set(first.fields.map(fieldId)), second.fields, typeOf, values);
+  const secondResponse = await send({ action: "fill", items: opened.map(({ token, value }) => ({ token, value })) });
 
   const checks = {
     labelsFromRowTitles: byName["military.militaryPositionCode"]?.label === "계급" && byName.nationality?.label === "국적",
@@ -291,8 +301,10 @@
     languageExamPicked: value("languageExam[0].languageExamName") === "TOEIC",
     licensesPicked: searchBoxes("자격증검색").every(entry => statusOf(entry.field.token) === "filled") &&
       value("license[0].licenseName") === "정보처리기사" && value("license[1].licenseName") === "SQL개발자",
-    newFieldsReported: response.newFields === 6,
-    openedFieldsFilled: secondResponse.results.length === 6 && secondResponse.results.every(result => result.status === "filled") &&
+    newFieldsReported: response.newFields === 9,
+    examDetailsFilled: value("languageExam[0].score") === "900" && value("languageExam[0].examDate") === "2025.03.01" &&
+      value("languageExam[0].registNumber") === "000123456",
+    openedFieldsFilled: secondResponse.results.length === 9 && secondResponse.results.every(result => result.status === "filled") &&
       value("license[0].organization") === "한국산업인력공단" && value("license[0].registNumber") === "23201012345A" &&
       value("license[0].acquireDate") === "2023.06.02" &&
       value("license[1].organization") === "한국데이터산업진흥원" && value("license[1].registNumber") === "SQLD-054001234" &&

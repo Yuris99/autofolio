@@ -1,6 +1,6 @@
 import { allValues, classify, describeType, FIELD_TYPES, PROFILE_SCHEMA } from "./matcher.js";
 import { addFill, createRun, saveRun, summarize } from "./run-log.js";
-import { defaultChoice, rowsToAdd } from "./plan.js";
+import { defaultChoice, fieldId, followUpItems, rowsToAdd } from "./plan.js";
 
 const fieldsRoot = document.getElementById("fields");
 const status = document.getElementById("status");
@@ -97,6 +97,26 @@ function render(values, suggestions) {
   fillButton.disabled = !fields.length || !values.length;
 }
 
+// Scan the page and suggest a profile item per field: a mapping confirmed on this site before, else the rules.
+async function analysePage(siteMappings) {
+  const scanResult = await send("scan");
+  fields = scanResult.fields;
+  pageUrl = scanResult.url;
+  return new Map(fields.map(field => [field.token,
+    FIELD_TYPES.includes(siteMappings[fieldKey(field)])
+      ? { type: siteMappings[fieldKey(field)], reason: "이전에 확인한 매핑" }
+      : classify(field)
+  ]));
+}
+
+function reportRows(entries) {
+  for (const { label, result } of entries) {
+    const row = document.createElement("p");
+    row.textContent = `${result.status === "filled" ? "✓" : result.status === "review" ? "?" : "!"} ${label}: ${result.detail}`;
+    report.append(row);
+  }
+}
+
 document.getElementById("profile").addEventListener("click", () => chrome.runtime.openOptionsPage());
 layaToggle.addEventListener("change", () => chrome.storage.local.set({ useLaya: layaToggle.checked }));
 
@@ -114,16 +134,7 @@ document.getElementById("scan").addEventListener("click", async () => {
     ({ lastEntries = {} } = await sessionStore.get("lastEntries"));
     const { profile = {}, siteMappings = {} } = await chrome.storage.local.get(["profile", "siteMappings"]);
     const values = allValues(profile);
-    const analyse = async () => {
-      const scanResult = await send("scan");
-      fields = scanResult.fields;
-      pageUrl = scanResult.url;
-      return new Map(fields.map(field => [field.token,
-        FIELD_TYPES.includes(siteMappings[fieldKey(field)])
-          ? { type: siteMappings[fieldKey(field)], reason: "이전에 확인한 매핑" }
-          : classify(field)
-      ]));
-    };
+    const analyse = () => analysePage(siteMappings);
     let suggestions = await analyse();
     // One row per saved entry: press the page's "+" where a repeating block has fewer rows.
     const addedRows = [];
@@ -172,19 +183,9 @@ fillButton.addEventListener("click", async () => {
       if (field) siteMappings[fieldKey(field)] = selected.slice(0, selected.lastIndexOf(":"));
     }
     await chrome.storage.local.set({ siteMappings });
-    const { results, invalidFields = [], newFields = 0 } = await send("fill", { items });
-    report.replaceChildren();
-    for (const result of results) {
-      const field = fields.find(field => field.token === result.token);
-      const row = document.createElement("p");
-      row.textContent = `${result.status === "filled" ? "✓" : result.status === "review" ? "?" : "!"} ${field?.label || field?.name || result.token}: ${result.detail}`;
-      report.append(row);
-    }
-    if (invalidFields.length) {
-      const row = document.createElement("p");
-      row.textContent = `미완료/검증 오류: ${invalidFields.join(", ")}`;
-      report.append(row);
-    }
+    const labelOf = token => { const field = fields.find(field => field.token === token); return field?.label || field?.name || token; };
+    let { results, invalidFields = [], newFields = 0 } = await send("fill", { items });
+    const entries = results.map(result => ({ label: labelOf(result.token), result }));
     if (currentRun) {
       const chosen = new Map(choices.filter(choice => choice.select.value)
         .map(choice => [choice.token, choice.select.value.slice(0, choice.select.value.lastIndexOf(":"))]));
@@ -195,9 +196,41 @@ fillButton.addEventListener("click", async () => {
       if (type && index !== undefined) lastEntries[type.split(".")[0]] = Number(index);
     }
     await sessionStore.set({ lastEntries });
+
+    // Picks can open more fields (issuer, date, score). Fill those now instead of asking for a
+    // re-analysis: at most two more rounds, only fields with a clear default value.
+    const valueList = allValues(profile);
+    let followed = 0;
+    for (let round = 0; round < 2 && newFields > 0; round++) {
+      const seen = new Set(fields.map(fieldId));
+      const suggestions = await analysePage(siteMappings);
+      const more = followUpItems(seen, fields, field => suggestions.get(field.token)?.type, valueList, lastEntries);
+      render(valueList, suggestions);
+      if (!more.length) break;
+      const next = await send("fill", { items: more.map(({ token, value }) => ({ token, value })) });
+      entries.push(...next.results.map(result => ({ label: `${labelOf(result.token)} (이어서)`, result })));
+      results = [...results, ...next.results];
+      invalidFields = next.invalidFields || [];
+      newFields = next.newFields || 0;
+      followed += next.results.filter(result => result.status === "filled").length;
+      currentRun = createRun(pageUrl, fields, suggestions);
+      currentRun.version = chrome.runtime.getManifest().version;
+      currentRun.notes.push(`자동 이어서 입력 ${round + 1}회차`);
+      await recordRun(addFill(currentRun, new Map(more.map(item => [item.token, item.type])), next.results, invalidFields));
+    }
+
+    report.replaceChildren();
+    reportRows(entries);
+    if (invalidFields.length) {
+      const row = document.createElement("p");
+      row.textContent = `미완료/검증 오류: ${invalidFields.join(", ")}`;
+      report.append(row);
+    }
     const reviewCount = results.filter(result => result.status === "review").length;
-    const opened = newFields ? ` · 새로 열린 칸 ${newFields}개: 다시 분석하세요` : "";
-    setStatus(`${results.filter(result => result.status === "filled").length}/${items.length}개 입력 확인${reviewCount ? ` · ${reviewCount}개 직접 선택 필요(?)` : ""}${opened}. 내용을 확인한 뒤 직접 제출하세요.`);
+    const filledCount = results.filter(result => result.status === "filled").length;
+    const followNote = followed ? ` (새로 열린 칸 ${followed}개 포함)` : "";
+    const opened = newFields ? ` · 아직 새로 열린 칸 ${newFields}개: 다시 분석하세요` : "";
+    setStatus(`${filledCount}/${results.length}개 입력 확인${followNote}${reviewCount ? ` · ${reviewCount}개 직접 선택 필요(?)` : ""}${opened}. 내용을 확인한 뒤 직접 제출하세요.`);
   } catch (error) {
     setStatus(`입력 실패: ${error.message}`);
     if (currentRun) { currentRun.notes.push(`입력 실패: ${error.message}`); await recordRun(currentRun); }

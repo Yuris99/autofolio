@@ -34,3 +34,20 @@ export function defaultChoice(field, type, candidates, lastEntries = {}) {
   if (candidates.length === 1) return candidates[0].key;
   return candidates.find(item => item.key === `${type}:${lastEntries[group]}`)?.key || "";
 }
+
+// Identity of a field across scans (tokens are renumbered on every scan).
+export function fieldId(field) {
+  return [field.name, field.label, field.section, field.inputType, field.loop ? `${field.loop.key}#${field.loop.index}` : ""].join("|");
+}
+
+// After a fill, picks can open more fields (a certificate's issuer and date, an exam's score).
+// Returns what to fill in those fields right away: only fields not seen before, and only when a
+// saved value is the clear default for them (the same rule the popup uses to preselect).
+export function followUpItems(seenIds, fields, typeOf, values, lastEntries = {}) {
+  return fields.filter(field => !seenIds.has(fieldId(field))).flatMap(field => {
+    const type = typeOf(field);
+    const key = defaultChoice(field, type, values.filter(item => item.type === type), lastEntries);
+    const value = values.find(item => item.key === key)?.value;
+    return value ? [{ token: field.token, value, field, type, key }] : [];
+  });
+}
