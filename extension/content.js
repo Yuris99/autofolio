@@ -9,22 +9,70 @@
     let node = element.parentElement;
     for (let depth = 0; node && depth < 5; depth++, node = node.parentElement) {
       const heading = node.querySelector(":scope > legend, :scope > h2, :scope > h3, :scope > h4, :scope > .title, :scope > .section-title");
-      if (heading?.textContent.trim()) return heading.textContent.trim().slice(0, 100);
+      const text = textOf(heading).slice(0, 100);
+      if (text) return text;
       if (node.matches("fieldset") && node.getAttribute("aria-label")) return node.getAttribute("aria-label");
     }
     return "";
   }
 
+  // Text of a label without the controls inside it; a label wrapping a <select>
+  // would otherwise read as every option's text run together.
+  const CONTROLS = "select, option, input, textarea, button, script, style";
+  function textOf(node) {
+    if (!node) return "";
+    const parts = [];
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+      acceptNode: text => text.parentElement?.closest(CONTROLS) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+    });
+    while (walker.nextNode()) parts.push(walker.currentNode.nodeValue);
+    return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 120);
+  }
+
   function labelFor(element) {
-    const direct = [...(element.labels || [])].map(label => label.textContent.trim()).filter(Boolean).join(" ");
+    const direct = [...(element.labels || [])].map(textOf).filter(Boolean).join(" ");
     if (direct) return direct.slice(0, 120);
-    const wrapping = element.closest("label");
-    if (wrapping) return wrapping.textContent.trim().slice(0, 120);
+    const wrapping = textOf(element.closest("label"));
+    if (wrapping) return wrapping;
     const labelledBy = element.getAttribute("aria-labelledby");
-    if (labelledBy) return labelledBy.split(/\s+/).map(id => document.getElementById(id)?.textContent.trim()).filter(Boolean).join(" ").slice(0, 120);
-    const container = element.closest("td, li, .form-group, .field, .input-group");
-    const sibling = container?.querySelector("label, th, .label");
-    return sibling?.textContent.trim().slice(0, 120) || "";
+    if (labelledBy) return labelledBy.split(/\s+/).map(id => textOf(document.getElementById(id))).filter(Boolean).join(" ").slice(0, 120);
+    const container = element.closest("td, dd, li, .form-group, .field, .input-group");
+    const heading = container?.previousElementSibling?.matches("th, dt, .title, .label") ? container.previousElementSibling : null;
+    return textOf(container?.querySelector("label, th, .label")) || textOf(heading);
+  }
+
+  // One field per radio group: its question, not any single choice, is what gets classified.
+  function radioGroup(element) {
+    if (!element.name) return [element];
+    const scope = element.form || document;
+    return [...scope.querySelectorAll(`input[type="radio"][name="${CSS.escape(element.name)}"]`)];
+  }
+
+  function groupLabel(element) {
+    const group = element.closest("[role='radiogroup']");
+    const named = group && (group.getAttribute("aria-label") ||
+      (group.getAttribute("aria-labelledby") || "").split(/\s+/).map(id => textOf(document.getElementById(id))).join(" ").trim());
+    if (named) return named;
+    // The question usually sits beside the row holding every choice: <th>성별</th><td>(radios)</td>.
+    const radios = radioGroup(element);
+    let row = element.parentElement;
+    while (row && !radios.every(radio => row.contains(radio))) row = row.parentElement;
+    for (let depth = 0; row && depth < 3; depth++, row = row.parentElement) {
+      const heading = row.querySelector(":scope > legend, :scope > th, :scope > dt, :scope > .title, :scope > .label") ||
+        (row.previousElementSibling?.matches("th, dt, .title, .label, label") ? row.previousElementSibling : null);
+      const text = textOf(heading);
+      if (text && !radios.some(radio => heading.contains(radio))) return text;
+    }
+    return nearbySection(element);
+  }
+
+  function chooseRadio(element, value) {
+    const radios = radioGroup(element);
+    const texts = radios.map(radio => labelFor(radio) || radio.value);
+    let picked = globalThis.AutoFolioMatch.pickOption(value, texts);
+    if (picked.index < 0) picked = globalThis.AutoFolioMatch.pickOption(value, radios.map(radio => radio.value));
+    if (picked.index < 0) return { radio: null, detail: `선택지에서 "${value}"를 찾지 못했습니다 (${texts.join(", ")}).` };
+    return { radio: radios[picked.index] };
   }
 
   function visible(element) {
@@ -37,31 +85,39 @@
     elements = new Map();
     const fields = [];
     const candidates = document.querySelectorAll("input, textarea, select, [contenteditable='true']");
+    const seenRadios = new Set();
     let index = 0;
     for (const element of candidates) {
-      if (!visible(element)) continue;
+      if (!visible(element) || seenRadios.has(element)) continue;
       const inputType = element instanceof HTMLInputElement ? element.type : element.localName;
       if (["hidden", "password", "file", "submit", "button", "reset", "image", "color", "range"].includes(inputType)) continue;
+      const radios = inputType === "radio" ? radioGroup(element) : null;
+      radios?.forEach(radio => seenRadios.add(radio));
       const token = `af-${++index}`;
       elements.set(token, element);
+      const section = nearbySection(element);
+      let options = [];
+      if (element instanceof HTMLSelectElement) options = [...element.options].map(o => ({ value: o.value, text: o.text.trim() }));
+      if (radios) options = radios.map(radio => ({ value: radio.value, text: labelFor(radio) }));
       fields.push({
         token,
-        label: labelFor(element),
+        label: radios ? groupLabel(element) : labelFor(element),
         ariaLabel: element.getAttribute("aria-label") || "",
         placeholder: element.getAttribute("placeholder") || "",
-        section: nearbySection(element),
+        section,
         name: element.getAttribute("name") || "",
         id: element.id || "",
         inputType,
-        required: element.required || element.getAttribute("aria-required") === "true",
-        options: element instanceof HTMLSelectElement ? [...element.options].map(o => ({ value: o.value, text: o.text.trim() })).slice(0, 80) : []
+        required: element.required || element.getAttribute("aria-required") === "true" || Boolean(radios?.some(radio => radio.required)),
+        options: options.slice(0, 80)
       });
     }
     return fields;
   }
 
   function read(element) {
-    if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) return element.checked ? element.value : "";
+    if (element instanceof HTMLInputElement && element.type === "radio") return radioGroup(element).find(radio => radio.checked)?.value ?? "";
+    if (element instanceof HTMLInputElement && element.type === "checkbox") return element.checked ? element.value : "";
     if (element instanceof HTMLSelectElement) return element.value;
     return "value" in element ? element.value : element.textContent;
   }
@@ -146,6 +202,19 @@
     const digits = value.replace(/\D/g, "");
     if (element.type === "date" && digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
     if (element.type === "month" && digits.length >= 6) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}`;
+    // Text date boxes: follow the format the page hints at (placeholder "YYYY.MM.DD", maxlength 8, ...).
+    const looksLikeDate = /^\d{4}\D?\d{2}(\D?\d{2})?\D?$/.test(value.trim());
+    if (element.type === "text" && looksLikeDate) {
+      const hint = `${element.placeholder} ${element.title} ${element.dataset.format || ""}`;
+      const format = hint.match(/y{4}(\W?)m{2}(?:(\W?)d{2})?/i);
+      if (format) {
+        const [, first, second = ""] = format;
+        return format[0].toLowerCase().includes("dd") && digits.length === 8
+          ? `${digits.slice(0, 4)}${first}${digits.slice(4, 6)}${second}${digits.slice(6, 8)}`
+          : `${digits.slice(0, 4)}${first}${digits.slice(4, 6)}`;
+      }
+      if (element.maxLength === digits.length) return digits;
+    }
     return value;
   }
 
@@ -158,13 +227,27 @@
       if (isSearchInput(element)) return await fillSearch(item, element, value);
       let expected = formattedValue(element, value);
       if (element instanceof HTMLSelectElement) {
-        const match = [...element.options].find(option => option.value === value || option.text.trim() === value);
-        if (!match) return { token: item.token, status: "skipped", detail: "선택 목록에 값이 없습니다." };
+        const options = [...element.options].filter(option => option.value !== "");
+        let match = options.find(option => option.value === value);
+        if (!match) {
+          const picked = globalThis.AutoFolioMatch.pickOption(value, options.map(option => option.text));
+          if (picked.index < 0) {
+            const shown = picked.candidates.length ? ` (비슷한 항목: ${picked.candidates.join(", ")})` : "";
+            return { token: item.token, status: "review", detail: `선택 목록에서 확실한 항목을 찾지 못했습니다${shown}. 직접 선택하세요.` };
+          }
+          match = options[picked.index];
+        }
         expected = match.value;
         element.value = expected;
         element.dispatchEvent(new Event("input", { bubbles: true }));
         element.dispatchEvent(new Event("change", { bubbles: true }));
-      } else if (element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type)) {
+      } else if (element instanceof HTMLInputElement && element.type === "radio") {
+        const { radio, detail } = chooseRadio(element, value);
+        if (!radio) return { token: item.token, status: "review", detail };
+        if (!radio.checked) radio.click();
+        const ok = radio.checked;
+        return { token: item.token, status: ok ? "filled" : "failed", detail: ok ? `"${labelFor(radio) || radio.value}" 선택` : "선택되지 않았습니다.", expected: radio.value };
+      } else if (element instanceof HTMLInputElement && element.type === "checkbox") {
         if (element.value !== value && labelFor(element) !== value) return { token: item.token, status: "skipped", detail: "선택 항목과 값이 다릅니다." };
         if (!element.checked) element.click();
         expected = element.value;

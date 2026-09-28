@@ -3,12 +3,13 @@ import { cleanProfile, LONG_FIELDS, PROFILE_SCHEMA } from "./matcher.js";
 const form = document.getElementById("profileForm");
 const saved = document.getElementById("saved");
 
-function input(label, key, value = "") {
+function input(label, key, value = "", hint = "") {
   const wrapper = document.createElement("label");
   wrapper.textContent = label;
   const element = document.createElement(LONG_FIELDS.has(key) ? "textarea" : "input");
   element.name = key;
   element.value = value;
+  if (hint) element.placeholder = `예: ${hint}`;
   element.autocomplete = "off";
   if (LONG_FIELDS.has(key)) { element.rows = 3; wrapper.className = "wide"; }
   wrapper.append(element);
@@ -36,7 +37,7 @@ function readGrid(root) {
 
 function render(profile) {
   form.replaceChildren();
-  for (const { group, label, single, fields } of PROFILE_SCHEMA) {
+  for (const { group, label, single, fields, hints = {} } of PROFILE_SCHEMA) {
     const section = document.createElement("section");
     const heading = document.createElement("h2");
     heading.textContent = label;
@@ -45,7 +46,7 @@ function render(profile) {
     section.append(heading, list);
     if (single) {
       list.className = "grid";
-      for (const [key, fieldLabel] of Object.entries(fields)) list.append(input(fieldLabel, key, profile[group]?.[key] || ""));
+      for (const [key, fieldLabel] of Object.entries(fields)) list.append(input(fieldLabel, key, profile[group]?.[key] || "", hints[key]));
     } else {
       for (const data of profile[group] || []) entry(list, fields, data);
       const add = document.createElement("button");

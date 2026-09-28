@@ -2,7 +2,12 @@
 // descriptions all read this list, so a new item only needs to be added here.
 export const PROFILE_SCHEMA = [
   { group: "personal", label: "인적사항", single: true,
-    fields: { name: "이름", birthDate: "생년월일", email: "이메일", phone: "휴대전화", address: "주소" } },
+    fields: { name: "이름", englishName: "영문 이름", chineseName: "한자 이름", birthDate: "생년월일", gender: "성별",
+      nationality: "국적", email: "이메일", phone: "휴대전화", zipCode: "우편번호", address: "주소", addressDetail: "상세주소" },
+    hints: { englishName: "HONG GILDONG", birthDate: "1999.01.31", gender: "남 / 여", nationality: "대한민국", address: "도로명 주소" } },
+  { group: "military", label: "병역", single: true,
+    fields: { status: "병역 구분", branch: "군별", rank: "계급", startDate: "입대일", endDate: "전역일", discharge: "제대 구분" },
+    hints: { status: "군필 / 미필 / 면제 / 비대상", branch: "육군", rank: "병장", discharge: "만기제대" } },
   { group: "education", label: "학력", title: "school",
     fields: { school: "학교명", major: "전공", startDate: "입학일", graduationDate: "졸업일", gpa: "학점" } },
   { group: "career", label: "경력", title: "company",
@@ -34,6 +39,18 @@ const RULES = [
   ["personal.email", /이메일|전자우편|e-?mail/i],
   ["personal.phone", /휴대.?전화|휴대폰|핸드폰|연락처|전화번호|mobile|cell.?phone/i],
   ["personal.birthDate", /생년월일|생일|birth/i],
+  ["personal.englishName", /영문.?(이름|성명)|english.?name|name.?eng/i],
+  ["personal.chineseName", /한자.?(이름|성명)|한문.?(이름|성명)|chinese.?name/i],
+  ["personal.gender", /성별|gender|\bsex\b/i],
+  ["personal.nationality", /국적|nationality/i],
+  ["personal.zipCode", /우편.?번호|zip.?code|post.?code|postal/i],
+  ["personal.addressDetail", /상세.?주소|나머지.?주소|detail.?address|address.?detail/i],
+  ["military.discharge", /제대.?구분|전역.?구분|제대.?사유|제대.?유형/i],
+  ["military.rank", /계급/i],
+  ["military.branch", /군별|군.?종류/i],
+  ["military.startDate", /입대.?일|입영.?일/i],
+  ["military.endDate", /전역.?일|제대.?일/i],
+  ["military.status", /병역/i],
   ["education.school", /학교명|대학명|대학교명|졸업학교|최종학교|school|university/i],
   ["education.major", /전공|학과|학부|major|department/i],
   ["education.gpa", /학점|평점|gpa|grade.?point/i],
@@ -58,6 +75,10 @@ const RULES = [
 // Checked in order, so a section that names two groups ("자격증 및 어학") goes to the first.
 // Career comes after award and activity because "수상경력" and "활동경력" also contain 경력.
 const SECTION_RULES = [
+  [/병역|군\s?복무|military/i, [
+    ["military.startDate", /입대|입영|시작|start/i], ["military.endDate", /전역|제대.?일|종료|end/i],
+    ["military.discharge", /제대|전역|discharge/i], ["military.rank", /계급|rank|position/i],
+    ["military.branch", /군별|branch|kind/i], ["military.status", /구분|여부|type|status/i]]],
   [/어학|외국어|language/i, [
     ["language.obtainedDate", /취득|응시|일자|날짜/], ["language.score", /점수|등급|성적|급수/], ["language.test", /시험|종류|어학|명/]]],
   [/수상|award/i, [
@@ -83,32 +104,56 @@ const FALLBACK_RULES = [
   ["certificate.obtainedDate", /취득.?일|취득.?연월|발급.?일|자격.?취득/i]
 ];
 
+// Fields about someone else: a recommender's name must never get the applicant's.
+const OTHER_PERSON = /추천|가족|보호자|비상.?연락|recommend|referee|reference|family|guardian|parent|emergency/i;
+
+// "currentAddress.zipCode" -> "current Address zip Code", so word patterns can match it.
+function splitName(text) {
+  return String(text || "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[._\-[\]\d]+/g, " ").trim();
+}
+
+function matchSection(text, context) {
+  for (const [section, rules] of SECTION_RULES) {
+    if (!section.test(context)) continue;
+    const match = rules.find(([, pattern]) => pattern.test(text));
+    if (match) return match[0];
+  }
+  return null;
+}
+
+function infer(label, context, internal) {
+  if (label) {
+    for (const [type, pattern] of RULES) {
+      if (pattern.test(label)) return { type, reason: "라벨 규칙" };
+    }
+    const type = matchSection(label, context);
+    if (type) return { type, reason: "섹션 규칙" };
+    for (const [fallback, pattern] of FALLBACK_RULES) {
+      if (pattern.test(label)) return { type: fallback, reason: "라벨 규칙" };
+    }
+    return null;
+  }
+  // Internal names are useful only when the page provides no visible description.
+  const type = matchSection(internal, context);
+  if (type) return { type, reason: "필드 속성" };
+  for (const [ruleType, pattern] of RULES) {
+    if (pattern.test(internal)) return { type: ruleType, reason: "필드 속성" };
+  }
+  return null;
+}
+
 export function classify(field) {
   const label = [field.label, field.placeholder, field.ariaLabel].filter(Boolean).join(" ").trim();
+  const internal = [splitName(field.name), splitName(field.id)].filter(Boolean).join(" ");
   const context = [field.section, field.name, field.id].filter(Boolean).join(" ");
   if (!label && !context) return { type: null, reason: "필드 설명 없음" };
 
-  for (const [type, pattern] of RULES) {
-    if (pattern.test(label)) return { type, reason: "라벨 규칙" };
+  const result = infer(label, context, internal);
+  if (!result) return { type: null, reason: "확인 필요" };
+  if (result.type.startsWith("personal.") && OTHER_PERSON.test(`${label} ${context}`)) {
+    return { type: null, reason: "추천인·가족 등 다른 사람 칸" };
   }
-  if (label) {
-    for (const [section, rules] of SECTION_RULES) {
-      if (!section.test(context)) continue;
-      const match = rules.find(([, pattern]) => pattern.test(label));
-      if (match) return { type: match[0], reason: "섹션 규칙" };
-    }
-  }
-  for (const [type, pattern] of FALLBACK_RULES) {
-    if (pattern.test(label)) return { type, reason: "라벨 규칙" };
-  }
-  // Internal names are useful only when the page provides no visible description.
-  if (!label) {
-    const internal = [field.name, field.id].filter(Boolean).join(" ");
-    for (const [type, pattern] of RULES) {
-      if (pattern.test(internal)) return { type, reason: "필드 속성" };
-    }
-  }
-  return { type: null, reason: "확인 필요" };
+  return result;
 }
 
 export function valuesFor(profile, type) {

@@ -22,7 +22,7 @@
   const form = document.getElementById("profileForm");
   const group = name => form.querySelector(`[data-group="${name}"]`);
   const checks = [];
-  checks.push(["8 sections", form.querySelectorAll("section").length === 8]);
+  checks.push(["9 sections", form.querySelectorAll("section").length === 9]);
   checks.push(["saved name shown", group("personal").querySelector('[name="name"]').value === "홍길동"]);
   checks.push(["saved certificate shown", group("certificate").querySelectorAll(".entry").length === 1]);
 

@@ -53,6 +53,18 @@
   <label>자격증명 <input name="cert_search" role="combobox" aria-autocomplete="list" aria-controls="cert-results"></label>
   <ul id="cert-results" class="results" role="listbox" hidden></ul>
 </fieldset>
+<!-- Shaped like recruiter.co.kr: row headers in <th>, selects wrapped in a styling <label>. -->
+<table>
+  <tr><th>성별</th><td>
+    <label><input type="radio" name="genderFlag" value="M"> 남</label>
+    <label><input type="radio" name="genderFlag" value="F"> 여</label>
+  </td></tr>
+  <tr><th>생년월일</th><td><input name="birthday" placeholder="YYYY.MM.DD"></td></tr>
+  <tr><th>국적</th><td><label class="select"><select name="nationality">
+    <option value="">국가를 선택하세요.</option><option value="GH">가나</option><option value="KR">대한민국</option>
+  </select></label></td></tr>
+  <tr><th>추천인 성명</th><td><input name="recommender.name"></td></tr>
+</table>
 <script src="../extension/option-match.js"></script>
 <script src="../extension/content.js"></script>
 <script>
@@ -61,6 +73,14 @@
   const result = {};
   listener({ action: "scan" }, null, response => { result.scan = response; });
   const byName = Object.fromEntries(result.scan.fields.map(field => [field.name, field.token]));
+  const fieldOf = name => result.scan.fields.find(field => field.name === name);
+  const scanChecks = {
+    oneGenderField: result.scan.fields.filter(field => field.name === "genderFlag").length === 1,
+    genderLabel: fieldOf("genderFlag").label === "성별",
+    genderOptions: fieldOf("genderFlag").options.map(option => option.text).join() === "남,여",
+    selectLabelWithoutOptions: fieldOf("nationality").label === "국적",
+    recommenderLabel: fieldOf("recommender.name").label === "추천인 성명"
+  };
   listener({ action: "fill", items: [
     { token: byName.applicant_name, value: "홍길동" },
     { token: byName.email, value: "hong@example.com" },
@@ -68,10 +88,18 @@
     { token: byName.school, value: "숭실대학교" },
     { token: byName.school_search, value: "숭실대학교" },
     { token: byName.major_search, value: "소프트웨어 학부" },
-    { token: byName.cert_search, value: "정보처리기사" }
+    { token: byName.cert_search, value: "정보처리기사" },
+    { token: byName.genderFlag, value: "여" },
+    { token: byName.birthday, value: "19990131" },
+    { token: byName.nationality, value: "대한민국" }
   ] }, null, response => {
     const status = Object.fromEntries(response.results.map(item => [item.token, item.status]));
-    const passed = ["applicant_name", "email", "graduation", "school", "school_search", "major_search"].every(name => status[byName[name]] === "filled") &&
+    const failedScan = Object.entries(scanChecks).filter(([, ok]) => !ok).map(([name]) => name);
+    const passed = !failedScan.length &&
+      ["applicant_name", "email", "graduation", "school", "school_search", "major_search", "genderFlag", "birthday", "nationality"].every(name => status[byName[name]] === "filled") &&
+      document.querySelector('[name="genderFlag"][value="F"]').checked &&
+      document.querySelector('[name="birthday"]').value === "1999.01.31" &&
+      document.querySelector('[name="nationality"]').value === "KR" &&
       status[byName.cert_search] === "review" &&
       document.querySelector('[name="graduation"]').value === "2024-02-20" &&
       document.querySelector('[name="school"]').value === "SSU" &&
@@ -79,7 +107,7 @@
       document.querySelector('[name="major_search"]').value === "소프트웨어학부" &&
       !document.querySelector('[name="cert_search"]').dataset.chosen;
     document.body.dataset.testResult = passed ? "PASS" : "FAIL";
-    document.body.dataset.testDetails = JSON.stringify(response.results);
+    document.body.dataset.testDetails = JSON.stringify({ failedScan, results: response.results });
   });
 </script>
 </html>
