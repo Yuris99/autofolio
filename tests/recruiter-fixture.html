@@ -209,7 +209,9 @@
   // linkedForm-like: a change on a [data-rel-id] input enables the fields that name it.
   document.addEventListener("change", event => {
     const relId = event.target.dataset?.relId;
-    if (relId && event.target.value) document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
+    // Only certificates react; the exam row never opens its fields by itself, so AutoFolio's
+    // fallback has to open them.
+    if (relId?.startsWith("license") && event.target.value) document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
   });
   const searchItems = { foreignExam: ["TOEIC", "TOEIC Speaking", "TOEFL iBT"], license: ["정보처리기사", "정보처리산업기사", "정보처리기능사", "SQL개발자", "SQL전문가"] };
   for (const input of document.querySelectorAll("input[type='search']")) recruiterSearch(input, searchItems[input.dataset.type]);

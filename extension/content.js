@@ -342,6 +342,28 @@
     await wait(300);
   }
 
+  // Fallback when the page did not react to the pick: open the fields the page itself marks as
+  // belonging to it (data-rel-target naming the row's data-rel-id), but only when that linked
+  // input now holds a value, i.e. the pick really happened. This is what the site does after a
+  // person's click; nothing outside those marked fields is touched.
+  async function openLinkedFields(row) {
+    let opened = 0;
+    for (const source of row.querySelectorAll("[data-rel-id]")) {
+      const relId = source.dataset.relId;
+      if (!relId || !source.value) continue;
+      for (const field of document.querySelectorAll(`[data-rel-target="${CSS.escape(relId)}"]`)) {
+        if (!field.disabled) continue;
+        field.disabled = false;
+        opened++;
+      }
+    }
+    if (opened) {
+      log(`세부 칸 ${opened}개를 직접 열었음 (사이트가 선택에 반응하지 않음)`);
+      await wait(100);
+    }
+    return opened;
+  }
+
   // After a pick, the text can land outside the box: a hidden input or a "selected" label in the same row.
   function shownNearby(element, text) {
     const { normalize } = globalThis.AutoFolioMatch;
@@ -422,8 +444,8 @@
     if (!stillOpen && (shownNearby(element, texts[picked.index]) || normalize(read(element)) === normalize(value))) {
       // The box itself may be cleared after a pick, so the settle-time recheck is skipped (no expected).
       const check = picked.loose ? " · 비슷한 이름으로 골랐으니 확인하세요" : "";
-      const locked = [...row.querySelectorAll("input[data-rel-target], select[data-rel-target], textarea[data-rel-target]")].filter(field => field.disabled).length;
-      const lockedNote = locked ? ` · 선택 후에도 세부 칸 ${locked}개가 잠겨 있음` : "";
+      const opened = await openLinkedFields(row);
+      const lockedNote = opened ? ` · 사이트가 열지 않은 세부 칸 ${opened}개를 직접 열었음` : "";
       return { token: item.token, status: "filled", detail: `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}${check}${lockedNote}` };
     }
     return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 선택했지만 화면에서 확인되지 않습니다. 확인하세요.` };
