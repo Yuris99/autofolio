@@ -112,7 +112,82 @@
   </div>
 </div>
 </section>
+<!-- Step 3 (어학/자격/기타): search boxes that search on Enter and list results beside the box. -->
+<section class="writeResume" data-code="18"><header><h1 class="h1">어학/자격/기타</h1></header>
+<div class="subject" data-wrap="foreignExam"><h2 class="h2">공인외국어시험</h2>
+  <div class="row in-span loop" data-loop="languageExam" data-index="0">
+    <div class="span per20 btn"><label class="title">시험</label></div>
+    <div class="span per80 middle-set">
+      <div class="search"><label><input type="search" class="text" data-type="foreignExam" placeholder="키워드 입력 후 &quot;Enter&quot;로 검색"><span class="label">시험검색</span></label><div class="searchResult"></div></div>
+      <input type="hidden" name="languageExam[0].languageExamName" value=""><span class="searchResultName"></span>
+      <input type="text" name="languageExam[0].languageExamCode" value="" class="hidden" data-rel-id="languageExam[0]" title="시험 코드">
+    </div>
+  </div>
+</div>
+<div class="subject" data-wrap="license"><h2 class="h2">자격증 / 면허증</h2>
+  <div class="row loop" data-loop="license">
+    <div class="row in-span no-margin">
+      <div class="span per20 btn"><label class="title required">자격증명</label></div>
+      <div class="span per80 middle-set">
+        <div class="search"><label><input type="search" class="text" data-type="license" placeholder="키워드 입력 후 &quot;Enter&quot;로 검색"><span class="label">자격증검색</span></label><div class="searchResult"></div></div>
+        <input type="hidden" name="license[0].licenseName" value=""><span class="searchResultName"></span>
+        <input type="text" name="license[0].licenseCode" value="" class="hidden" data-rel-id="license[0]" title="자격증코드">
+      </div>
+    </div>
+    <div class="row in-span half-margin">
+      <label class="span per20 title required">발급기관</label>
+      <div class="span per35"><input type="text" class="text" name="license[0].organization" placeholder="발급기관" title="발급기관" data-rel-target="license[0]" disabled required></div>
+      <label class="span per20 title devider required">등록번호</label>
+      <div class="span per25"><input type="text" class="text" name="license[0].registNumber" placeholder="등록번호" title="등록번호" data-rel-target="license[0]" disabled required></div>
+    </div>
+    <div class="row in-span half-margin">
+      <label class="span per20 title required">취득일</label>
+      <div class="span per20"><input type="text" data-dates="license[0].licenseDate:YMD" class="text date" name="license[0].acquireDate" placeholder="취득일" title="취득일" data-rel-target="license[0]" disabled required></div>
+    </div>
+  </div>
+</div>
+</section>
 </form>
+<script>
+  // Like the site's widget: only a real Enter (keyCode 13) searches; picking a result fills the
+  // hidden name/code inputs, shows the name, clears the box and enables the dependent fields.
+  function recruiterSearch(input, items) {
+    const list = input.closest(".search").querySelector(".searchResult");
+    const row = input.closest(".row");
+    input.addEventListener("keydown", event => {
+      if (event.keyCode !== 13) return;
+      event.preventDefault();
+      const query = input.value.replace(/\s/g, "").toLowerCase();
+      setTimeout(() => {
+        const ul = document.createElement("ul");
+        const found = items.filter(item => item.replace(/\s/g, "").toLowerCase().includes(query));
+        for (const item of found) {
+          const li = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = "#";
+          link.textContent = item;
+          link.addEventListener("click", clickEvent => {
+            clickEvent.preventDefault();
+            row.querySelector('input[type="hidden"][name$="Name"]').value = item;
+            row.querySelector('input.hidden[data-rel-id]').value = String(items.indexOf(item) + 1);
+            row.querySelector(".searchResultName").textContent = item;
+            input.value = "";
+            list.replaceChildren();
+            const relId = row.querySelector("[data-rel-id]").dataset.relId;
+            document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
+          });
+          li.append(link);
+          ul.append(li);
+        }
+        if (!found.length) ul.innerHTML = "<li>검색결과가 없습니다.</li>";
+        list.replaceChildren(ul);
+      }, 250);
+    });
+  }
+  recruiterSearch(document.querySelector('[data-type="foreignExam"]'), ["TOEIC", "TOEIC Speaking", "TOEFL iBT"]);
+  recruiterSearch(document.querySelector('[data-type="license"]'), ["정보처리기사", "정보처리산업기사", "정보처리기능사"]);
+</script>
+<script src="../extension/page-bridge.js"></script>
 <script src="../extension/option-match.js"></script>
 <script src="../extension/content.js"></script>
 <script type="module">
@@ -120,42 +195,65 @@
   const profile = {
     personal: { name: "김예시", englishName: "KIM YESI", chineseName: "金例示", gender: "여", birthDate: "1999.01.31",
       nationality: "대한민국", zipCode: "04524", address: "서울특별시 중구 세종대로 110", addressDetail: "1층", email: "yesi@example.com" },
-    military: { status: "군필", rank: "병장", startDate: "2019.03", endDate: "2020.09", discharge: "만기제대" }
+    military: { status: "군필", rank: "병장", startDate: "2019.03", endDate: "2020.09", discharge: "만기제대" },
+    language: [{ test: "TOEIC", score: "900", obtainedDate: "2025.03.01" }],
+    certificate: [{ name: "정보처리기사", obtainedDate: "20230602", issuer: "한국산업인력공단", number: "23201012345A" }]
   };
-  let scan;
-  listener({ action: "scan" }, null, response => { scan = response; });
-  const types = Object.fromEntries(scan.fields.map(field => [field.name, classify(field).type]));
   const values = allValues(profile);
-  const items = scan.fields.map(field => ({ token: field.token, value: values.find(item => item.type === types[field.name])?.value }))
-    .filter(item => item.value);
-  const byName = Object.fromEntries(scan.fields.map(field => [field.name, field]));
+  const scanPage = () => new Promise(resolve => listener({ action: "scan" }, null, resolve));
+  const fillPage = items => new Promise(resolve => listener({ action: "fill", items }, null, resolve));
+  // What the popup does when the user accepts every suggestion.
+  const plan = fields => fields.map(field => ({ field, type: classify(field).type }))
+    .map(({ field, type }) => ({ field, type, value: values.find(item => item.type === type)?.value }));
 
-  listener({ action: "fill", items }, null, response => {
-    const status = Object.fromEntries(response.results.map(result => [scan.fields.find(field => field.token === result.token).name, result.status]));
-    const value = name => document.querySelector(`[name="${name}"]`).value;
-    const checked = name => document.querySelector(`[name="${name}"]:checked`)?.value;
-    const checks = {
-      labelsFromRowTitles: byName["military.militaryPositionCode"]?.label === "계급" && byName.nationality?.label === "국적",
-      genderIsOneQuestion: byName.genderFlag?.label === "성별" && scan.fields.filter(field => field.name === "genderFlag").length === 1,
-      genderChoices: byName.genderFlag?.options.map(option => option.text).join() === "남,여",
-      sectionsAreHeadings: byName["recommender.name"]?.section === "추천인" && byName.englishName?.section === "지원자",
-      hiddenZipNotScanned: !byName["currentAddress.zipCode"],
-      notForRecommender: types["recommender.name"] === null && types["recommender.contact"] === null && !value("recommender.name"),
-      perApplicationLeftEmpty: types.hopeSalary === null && types.joinPossibleDate === null && types["applySector[0].depth0"] === null,
-      englishName: value("englishName") === "KIM YESI",
-      chineseName: value("chineseName") === "金例示",
-      gender: checked("genderFlag") === "F",
-      birthday: value("birthday") === "1999.01.31",
-      nationality: value("nationality") === "KR",
-      readonlyAddressLeftToUser: status["currentAddress.address"] === "review" && !value("currentAddress.address"),
-      addressDetail: value("currentAddress.detailAddress") === "1층",
-      military: checked("military.militaryTypeCode") === "01" && value("military.militaryPositionCode") === "04" &&
-        value("military.militaryStartDate") === "2019.03" && value("military.militaryEndDate") === "2020.09" &&
-        value("military.militaryDischargeCode") === "01"
-    };
-    const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
-    document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
-    document.body.dataset.testDetails = JSON.stringify({ failed, types, results: response.results.map(r => [r.token, r.status, r.detail]) });
+  const first = await scanPage();
+  const planned = plan(first.fields);
+  const typeOf = name => planned.find(entry => entry.field.name === name)?.type ?? null;
+  const byName = Object.fromEntries(first.fields.filter(field => field.name).map(field => [field.name, field]));
+  const searchBox = kind => planned.find(entry => entry.field.label.startsWith(kind));
+  const response = await fillPage(planned.filter(entry => entry.value).map(entry => ({ token: entry.field.token, value: entry.value })));
+  const statusOf = token => response.results.find(result => result.token === token)?.status;
+  const status = Object.fromEntries(first.fields.filter(field => field.name).map(field => [field.name, statusOf(field.token)]));
+  const value = name => document.querySelector(`[name="${name}"]`).value;
+  const checked = name => document.querySelector(`[name="${name}"]:checked`)?.value;
+
+  // Second pass: the certificate pick enabled its issuer, number and date fields.
+  const second = await scanPage();
+  const opened = plan(second.fields).filter(entry => entry.field.name.startsWith("license[0].") && entry.value);
+  const secondResponse = await fillPage(opened.map(entry => ({ token: entry.field.token, value: entry.value })));
+
+  const checks = {
+    labelsFromRowTitles: byName["military.militaryPositionCode"]?.label === "계급" && byName.nationality?.label === "국적",
+    genderIsOneQuestion: byName.genderFlag?.label === "성별" && first.fields.filter(field => field.name === "genderFlag").length === 1,
+    genderChoices: byName.genderFlag?.options.map(option => option.text).join() === "남,여",
+    sectionsAreHeadings: byName["recommender.name"]?.section === "추천인" && byName.englishName?.section === "지원자",
+    hiddenZipNotScanned: !byName["currentAddress.zipCode"],
+    notForRecommender: typeOf("recommender.name") === null && typeOf("recommender.contact") === null && !value("recommender.name"),
+    perApplicationLeftEmpty: typeOf("hopeSalary") === null && typeOf("joinPossibleDate") === null && typeOf("applySector[0].depth0") === null,
+    englishName: value("englishName") === "KIM YESI",
+    chineseName: value("chineseName") === "金例示",
+    gender: checked("genderFlag") === "F",
+    birthday: value("birthday") === "1999.01.31",
+    nationality: value("nationality") === "KR",
+    readonlyAddressLeftToUser: status["currentAddress.address"] === "review" && !value("currentAddress.address"),
+    addressDetail: value("currentAddress.detailAddress") === "1층",
+    military: checked("military.militaryTypeCode") === "01" && value("military.militaryPositionCode") === "04" &&
+      value("military.militaryStartDate") === "2019.03" && value("military.militaryEndDate") === "2020.09" &&
+      value("military.militaryDischargeCode") === "01",
+    searchBoxesClassified: searchBox("시험검색")?.type === "language.test" && searchBox("자격증검색")?.type === "certificate.name",
+    languageExamPicked: statusOf(searchBox("시험검색")?.field.token) === "filled" && value("languageExam[0].languageExamName") === "TOEIC",
+    licensePicked: statusOf(searchBox("자격증검색")?.field.token) === "filled" && value("license[0].licenseName") === "정보처리기사",
+    newFieldsReported: response.newFields === 3,
+    openedFieldsFilled: secondResponse.results.length === 3 && secondResponse.results.every(result => result.status === "filled") &&
+      value("license[0].organization") === "한국산업인력공단" && value("license[0].registNumber") === "23201012345A" &&
+      value("license[0].acquireDate") === "2023.06.02"
+  };
+  const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
+  document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
+  document.body.dataset.testDetails = JSON.stringify({
+    failed, newFields: response.newFields,
+    types: planned.map(entry => [entry.field.name || entry.field.label, entry.type]),
+    results: [...response.results, ...secondResponse.results].map(result => [result.token, result.status, result.detail])
   });
 </script>
 </html>

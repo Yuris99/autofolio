@@ -109,6 +109,26 @@
     return true;
   }
 
+  function isField(element) {
+    const inputType = element instanceof HTMLInputElement ? element.type : element.localName;
+    return visible(element) && !["hidden", "password", "file", "submit", "button", "reset", "image", "color", "range"].includes(inputType);
+  }
+
+  // Fields visible now, counting a radio group once, without replacing the scanned tokens.
+  function countFields() {
+    const groups = new Set();
+    let count = 0;
+    for (const element of document.querySelectorAll("input, textarea, select, [contenteditable='true']")) {
+      if (!isField(element)) continue;
+      if (element.type === "radio" && element.name) {
+        if (groups.has(element.name)) continue;
+        groups.add(element.name);
+      }
+      count++;
+    }
+    return count;
+  }
+
   function scan() {
     elements = new Map();
     const fields = [];
@@ -116,9 +136,8 @@
     const seenRadios = new Set();
     let index = 0;
     for (const element of candidates) {
-      if (!visible(element) || seenRadios.has(element)) continue;
+      if (seenRadios.has(element) || !isField(element)) continue;
       const inputType = element instanceof HTMLInputElement ? element.type : element.localName;
-      if (["hidden", "password", "file", "submit", "button", "reset", "image", "color", "range"].includes(inputType)) continue;
       const radios = inputType === "radio" ? radioGroup(element) : null;
       radios?.forEach(radio => seenRadios.add(radio));
       const token = `af-${++index}`;
@@ -163,16 +182,63 @@
   const OPTION_SELECTOR = "[role='option'], .ui-menu-item, .autocomplete-suggestion, [class*='autocomplete'] li, [class*='suggest'] li, [class*='search-result'] li";
 
   function isSearchInput(element) {
-    return element instanceof HTMLInputElement && (element.getAttribute("role") === "combobox" || element.hasAttribute("aria-autocomplete") || element.hasAttribute("list"));
+    return element instanceof HTMLInputElement && (element.type === "search" || element.getAttribute("role") === "combobox" ||
+      element.hasAttribute("aria-autocomplete") || element.hasAttribute("list") || /검색|search/i.test(element.placeholder));
   }
 
-  // Prefer the list the input names; fall back to suggestion lists visible anywhere on the page.
+  // Result lists placed next to the box: <div class="search"><input><div class="searchResult">…</div></div>.
+  function nearbyResultLists(element) {
+    let node = element.parentElement;
+    for (let depth = 0; node && depth < 3; depth++, node = node.parentElement) {
+      const lists = [...node.querySelectorAll("[class*='result' i], [class*='suggest' i], [class*='autocomplete' i], [role='listbox']")]
+        .filter(list => !list.contains(element) && !/name/i.test(list.className));
+      if (lists.length) return lists;
+    }
+    return [];
+  }
+
+  // The clickable part of each result: the link or button inside a row, or the row itself.
+  function resultItems(list) {
+    const rows = [...list.querySelectorAll("[role='option'], li, tr")];
+    const items = rows.length ? rows.map(row => row.querySelector("a, button") || row) : [...list.querySelectorAll("a, button")];
+    return items.filter(item => visible(item) && item.getAttribute("aria-disabled") !== "true" && textOf(item));
+  }
+
+  // Prefer the list the input names, then one beside it; fall back to suggestion lists anywhere on the page.
   function visibleOptions(element) {
     const owned = ["aria-controls", "aria-owns"].flatMap(name => (element.getAttribute(name) || "").split(/\s+/))
       .map(id => id && document.getElementById(id)).filter(Boolean);
-    const roots = owned.length ? owned : [document];
-    return roots.flatMap(root => [...root.querySelectorAll(OPTION_SELECTOR)])
+    if (owned.length) return owned.flatMap(resultItems);
+    const nearby = nearbyResultLists(element).flatMap(resultItems);
+    if (nearby.length) return nearby;
+    return [...document.querySelectorAll(OPTION_SELECTOR)]
       .filter(option => option !== element && visible(option) && option.getAttribute("aria-disabled") !== "true" && option.textContent.trim());
+  }
+
+  async function waitForOptions(element, ms) {
+    let options = [];
+    for (let waited = 0; waited < ms && !options.length; waited += 150) {
+      await wait(150);
+      options = visibleOptions(element);
+    }
+    return options;
+  }
+
+  function pressEnter(element) {
+    // page-bridge.js presses Enter with a real keyCode from the page's world; without it, send what we can.
+    if (document.documentElement.dataset.autofolioBridge) element.dispatchEvent(new Event("autofolio:enter", { bubbles: true }));
+    else for (const type of ["keydown", "keypress", "keyup"]) element.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", bubbles: true }));
+  }
+
+  // After a pick, the text can land outside the box: a hidden input or a "selected" label in the same row.
+  function shownNearby(element, text) {
+    const { normalize } = globalThis.AutoFolioMatch;
+    const wanted = normalize(text);
+    if (normalize(read(element)) === wanted) return true;
+    const row = element.closest(".row, li, tr, .field, .form-group") || element.parentElement?.parentElement;
+    if (!row) return false;
+    return [...row.querySelectorAll("input")].some(input => input !== element && normalize(input.value) === wanted) ||
+      [...row.querySelectorAll("span, div, strong, em, p")].some(node => !node.children.length && normalize(node.textContent) === wanted);
   }
 
   function typeInto(element, value) {
@@ -202,26 +268,28 @@
       return { token: item.token, status: read(element) === texts[picked.index] ? "filled" : "failed", detail: `검색 목록에서 선택 · ${picked.reason}`, expected: texts[picked.index] };
     }
 
+    // Suggest-as-you-type lists appear on input; "type, then Enter" boxes need the key.
     typeInto(element, value);
-    let options = [];
-    for (let waited = 0; waited < 2500 && !options.length; waited += 150) {
-      await wait(150);
-      options = visibleOptions(element);
+    const needsEnter = /enter|엔터/i.test(`${element.placeholder} ${element.title}`);
+    let options = await waitForOptions(element, needsEnter ? 300 : 1200);
+    if (!options.length) {
+      pressEnter(element);
+      options = await waitForOptions(element, 3000);
     }
     if (!options.length) return { token: item.token, status: "review", detail: "검색 결과가 나타나지 않았습니다. 직접 검색해 선택하세요." };
 
-    const texts = options.map(option => option.textContent.trim());
+    const texts = options.map(option => textOf(option));
     const picked = pickOption(value, texts);
     if (picked.index < 0) {
       const shown = picked.candidates.length ? ` (${picked.candidates.join(", ")})` : "";
       return { token: item.token, status: "review", detail: `검색 결과: ${picked.reason}${shown}. 직접 선택하세요.` };
     }
     choose(options[picked.index]);
-    await wait(250);
-    const current = normalize(read(element));
-    const stillOpen = visibleOptions(element).length > 0;
-    if (current && (current === normalize(texts[picked.index]) || current === normalize(value)) && !stillOpen) {
-      return { token: item.token, status: "filled", detail: `검색 결과에서 선택 · ${picked.reason}`, expected: read(element) };
+    await wait(300);
+    const stillOpen = visibleOptions(element).some(option => options.includes(option));
+    if (!stillOpen && (shownNearby(element, texts[picked.index]) || normalize(read(element)) === normalize(value))) {
+      // The box itself may be cleared after a pick, so the settle-time recheck is skipped (no expected).
+      return { token: item.token, status: "filled", detail: `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}` };
     }
     return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 선택했지만 화면에서 확인되지 않습니다. 확인하세요.` };
   }
@@ -322,7 +390,7 @@
         // Controlled inputs can rerender after an event. Verify once more after the page settles.
         await wait(350);
         for (const result of results) {
-          if (result.status !== "filled") continue;
+          if (result.status !== "filled" || result.expected === undefined) continue;
           const element = elements.get(result.token);
           if (!element?.isConnected || read(element) !== result.expected) {
             result.status = "failed";
@@ -332,11 +400,14 @@
         }
         const invalidFields = [...document.querySelectorAll("input, textarea, select")]
           .filter(element => visible(element) && (element.getAttribute("aria-invalid") === "true" || (element.required && !element.checkValidity())))
-          .map(element => labelFor(element) || element.name || "설명 없는 필수 항목")
+          .map(element => (element.type === "radio" ? groupLabel(element) : labelFor(element)) || element.name || "설명 없는 필수 항목")
           .filter((label, index, all) => all.indexOf(label) === index);
         const counts = results.reduce((sum, result) => ({ ...sum, [result.status]: (sum[result.status] || 0) + 1 }), {});
         log("입력 완료", counts, invalidFields.length ? `미완료/오류 칸: ${invalidFields.join(", ")}` : "");
-        sendResponse({ results, invalidFields });
+        // Picking a certificate can enable its issuer and date fields, which the first scan skipped.
+        const newFields = countFields() - elements.size;
+        if (newFields > 0) log(`선택 후 새로 열린 칸 ${newFields}개`);
+        sendResponse({ results, invalidFields, newFields: Math.max(0, newFields) });
       })();
       return true;
     }

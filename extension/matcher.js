@@ -13,7 +13,7 @@ export const PROFILE_SCHEMA = [
   { group: "career", label: "경력", title: "company",
     fields: { company: "회사명", department: "부서", position: "직급·직무", startDate: "입사일", endDate: "퇴사일", description: "담당 업무" } },
   { group: "certificate", label: "자격증", title: "name",
-    fields: { name: "자격증명", obtainedDate: "취득일", issuer: "발급기관" } },
+    fields: { name: "자격증명", obtainedDate: "취득일", issuer: "발급기관", number: "자격증 번호" } },
   { group: "language", label: "어학", title: "test",
     fields: { test: "시험명", score: "점수·등급", obtainedDate: "취득일" } },
   { group: "award", label: "수상", title: "title",
@@ -62,6 +62,7 @@ const RULES = [
   ["career.endDate", /퇴사.?일|퇴사.?연월/i],
   ["certificate.name", /자격증.?명|자격.?명칭|자격.?종목|면허.?명|certificate|license/i],
   ["certificate.issuer", /발급.?기관|시행.?기관|자격.?기관/i],
+  ["certificate.number", /자격.?번호|자격증.?번호|면허.?번호|license.?(number|no)/i],
   ["language.test", /어학.?시험|시험.?명|시험.?종류|toeic|toefl|opic|teps|토익|토플|오픽|텝스|jlpt|hsk/i],
   ["language.score", /어학.?점수|어학.?성적|어학.?등급/i],
   ["award.title", /수상.?명|수상.?내역|수상.?경력/i],
@@ -93,7 +94,8 @@ const SECTION_RULES = [
     ["career.company", /회사|직장|근무처|기관/], ["career.department", /부서/], ["career.position", /직급|직위|직책|직무/],
     ["career.startDate", /입사|시작/], ["career.endDate", /퇴사|종료/], ["career.description", /업무|내용|설명/]]],
   [/자격|면허|certificate|license/i, [
-    ["certificate.obtainedDate", /취득|발급.?일/], ["certificate.issuer", /발급.?기관|시행.?기관/], ["certificate.name", /명칭|종목|이름|자격/]]],
+    ["certificate.obtainedDate", /취득|발급.?일/], ["certificate.issuer", /발급.?기관|시행.?기관/],
+    ["certificate.number", /등록.?번호|발급.?번호|번호/], ["certificate.name", /명칭|종목|이름|자격/]]],
   [/학력|대학교|대학|school|education/i, [
     ["education.startDate", /입학|시작.?일/], ["education.graduationDate", /졸업|종료.?일/],
     ["education.school", /학교|기관.?명/], ["education.major", /전공|학과|학부/]]]

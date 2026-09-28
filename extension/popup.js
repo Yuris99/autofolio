@@ -11,6 +11,10 @@ let fields = [];
 let choices = [];
 let pageUrl = "";
 let currentRun = null;
+// Which entry of each group was filled last ({ certificate: 1 }), so fields that open up after a
+// pick (issuer, date) default to the same certificate. Kept for the browser session only.
+let lastEntries = {};
+const sessionStore = chrome.storage.session || chrome.storage.local;
 const logSummary = document.getElementById("logSummary");
 
 async function recordRun(run) {
@@ -82,7 +86,9 @@ function render(values, suggestions) {
     const suggestion = suggestions.get(field.token);
     note.textContent = [field.section, field.inputType, suggestion?.reason].filter(Boolean).join(" · ");
     const candidates = values.filter(item => item.type === suggestion?.type);
-    const chosen = candidates.length === 1 ? candidates[0].key : "";
+    const group = suggestion?.type?.split(".")[0];
+    const sameEntry = candidates.find(item => item.key === `${suggestion?.type}:${lastEntries[group]}`);
+    const chosen = candidates.length === 1 ? candidates[0].key : sameEntry?.key || "";
     const select = valueSelect(values, chosen);
     wrapper.append(label, note, select);
     fieldsRoot.append(wrapper);
@@ -102,7 +108,10 @@ document.getElementById("scan").addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !/^https?:\/\//.test(tab.url || "")) throw new Error("지원서 웹 페이지에서 실행하세요.");
     tabId = tab.id;
+    // The bridge presses Enter in search boxes from the page's own world; see page-bridge.js.
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" }).catch(() => {});
     await chrome.scripting.executeScript({ target: { tabId }, files: ["option-match.js", "content.js"] });
+    ({ lastEntries = {} } = await sessionStore.get("lastEntries"));
     const scanResult = await send("scan");
     fields = scanResult.fields;
     pageUrl = scanResult.url;
@@ -151,7 +160,7 @@ fillButton.addEventListener("click", async () => {
       if (field) siteMappings[fieldKey(field)] = selected.slice(0, selected.lastIndexOf(":"));
     }
     await chrome.storage.local.set({ siteMappings });
-    const { results, invalidFields = [] } = await send("fill", { items });
+    const { results, invalidFields = [], newFields = 0 } = await send("fill", { items });
     report.replaceChildren();
     for (const result of results) {
       const field = fields.find(field => field.token === result.token);
@@ -169,8 +178,14 @@ fillButton.addEventListener("click", async () => {
         .map(choice => [choice.token, choice.select.value.slice(0, choice.select.value.lastIndexOf(":"))]));
       await recordRun(addFill(currentRun, chosen, results, invalidFields));
     }
+    for (const choice of choices) {
+      const [type, index] = choice.select.value.split(":");
+      if (type && index !== undefined) lastEntries[type.split(".")[0]] = Number(index);
+    }
+    await sessionStore.set({ lastEntries });
     const reviewCount = results.filter(result => result.status === "review").length;
-    setStatus(`${results.filter(result => result.status === "filled").length}/${items.length}개 입력 확인${reviewCount ? ` · ${reviewCount}개 직접 선택 필요(?)` : ""}. 내용을 확인한 뒤 직접 제출하세요.`);
+    const opened = newFields ? ` · 새로 열린 칸 ${newFields}개: 다시 분석하세요` : "";
+    setStatus(`${results.filter(result => result.status === "filled").length}/${items.length}개 입력 확인${reviewCount ? ` · ${reviewCount}개 직접 선택 필요(?)` : ""}${opened}. 내용을 확인한 뒤 직접 제출하세요.`);
   } catch (error) {
     setStatus(`입력 실패: ${error.message}`);
     if (currentRun) { currentRun.notes.push(`입력 실패: ${error.message}`); await recordRun(currentRun); }
