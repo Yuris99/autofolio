@@ -183,7 +183,18 @@
       (element.closest("label") || element.parentElement)?.click();
       await wait(250);
     }
+    // Click into the box like a person, so the page knows which row is being worked on.
+    const target = visible(element) ? element : element.closest("label") || element.parentElement;
+    target.scrollIntoView?.({ block: "center" });
+    pointerSequence(target, ["pointerover", "mouseover", "pointermove", "mousemove", "pointerdown", "mousedown"]);
     element.focus();
+    if (document.activeElement !== element) {
+      element.dispatchEvent(new FocusEvent("focus"));
+      element.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    }
+    pointerSequence(target, ["pointerup", "mouseup"]);
+    if (target === element) element.click();
+    await wait(100);
   }
 
   // Fields visible now, counting a radio group once, without replacing the scanned tokens.
@@ -382,12 +393,25 @@
     element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: value.slice(-1) }));
   }
 
-  function choose(option) {
-    // Many widgets select on mousedown, before the input blurs and the list closes.
-    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
+  // The mouse events a person's click produces, in order. Widgets often track the hovered item or
+  // the row being worked on from these, not from the click alone.
+  function pointerSequence(target, types) {
+    const rect = target.getBoundingClientRect();
+    const at = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+    for (const type of types) {
       const EventType = type.startsWith("pointer") && globalThis.PointerEvent ? PointerEvent : MouseEvent;
-      option.dispatchEvent(new EventType(type, { bubbles: true, cancelable: true, view: window }));
+      const bubbles = !["mouseenter", "mouseleave", "pointerenter", "pointerleave"].includes(type);
+      target.dispatchEvent(new EventType(type, { bubbles, cancelable: true, view: window, button: 0, buttons: /down/.test(type) ? 1 : 0, ...at }));
     }
+  }
+
+  function choose(option) {
+    option.scrollIntoView?.({ block: "nearest" });
+    pointerSequence(option, ["pointerover", "pointerenter", "mouseover", "mouseenter", "pointermove", "mousemove"]);
+    // Many widgets select on mousedown, before the input blurs and the list closes.
+    pointerSequence(option, ["pointerdown", "mousedown"]);
+    if (typeof option.focus === "function") option.focus();
+    pointerSequence(option, ["pointerup", "mouseup"]);
     option.click();
   }
 
