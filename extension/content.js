@@ -72,6 +72,73 @@
     element.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const OPTION_SELECTOR = "[role='option'], .ui-menu-item, .autocomplete-suggestion, [class*='autocomplete'] li, [class*='suggest'] li, [class*='search-result'] li";
+
+  function isSearchInput(element) {
+    return element instanceof HTMLInputElement && (element.getAttribute("role") === "combobox" || element.hasAttribute("aria-autocomplete") || element.hasAttribute("list"));
+  }
+
+  // Prefer the list the input names; fall back to suggestion lists visible anywhere on the page.
+  function visibleOptions(element) {
+    const owned = ["aria-controls", "aria-owns"].flatMap(name => (element.getAttribute(name) || "").split(/\s+/))
+      .map(id => id && document.getElementById(id)).filter(Boolean);
+    const roots = owned.length ? owned : [document];
+    return roots.flatMap(root => [...root.querySelectorAll(OPTION_SELECTOR)])
+      .filter(option => option !== element && visible(option) && option.getAttribute("aria-disabled") !== "true" && option.textContent.trim());
+  }
+
+  function typeInto(element, value) {
+    element.focus();
+    element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: value.slice(-1) }));
+    setNativeValue(element, value);
+    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: value.slice(-1) }));
+  }
+
+  function choose(option) {
+    // Many widgets select on mousedown, before the input blurs and the list closes.
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
+      const EventType = type.startsWith("pointer") && globalThis.PointerEvent ? PointerEvent : MouseEvent;
+      option.dispatchEvent(new EventType(type, { bubbles: true, cancelable: true, view: window }));
+    }
+    option.click();
+  }
+
+  async function fillSearch(item, element, value) {
+    const { pickOption, normalize } = globalThis.AutoFolioMatch;
+    const datalist = element.list;
+    if (datalist) {
+      const texts = [...datalist.options].map(option => option.value);
+      const picked = pickOption(value, texts);
+      if (picked.index < 0) return { token: item.token, status: "review", detail: `검색 목록: ${picked.reason}${picked.candidates.length ? ` (${picked.candidates.join(", ")})` : ""}` };
+      setNativeValue(element, texts[picked.index]);
+      return { token: item.token, status: read(element) === texts[picked.index] ? "filled" : "failed", detail: `검색 목록에서 선택 · ${picked.reason}`, expected: texts[picked.index] };
+    }
+
+    typeInto(element, value);
+    let options = [];
+    for (let waited = 0; waited < 2500 && !options.length; waited += 150) {
+      await wait(150);
+      options = visibleOptions(element);
+    }
+    if (!options.length) return { token: item.token, status: "review", detail: "검색 결과가 나타나지 않았습니다. 직접 검색해 선택하세요." };
+
+    const texts = options.map(option => option.textContent.trim());
+    const picked = pickOption(value, texts);
+    if (picked.index < 0) {
+      const shown = picked.candidates.length ? ` (${picked.candidates.join(", ")})` : "";
+      return { token: item.token, status: "review", detail: `검색 결과: ${picked.reason}${shown}. 직접 선택하세요.` };
+    }
+    choose(options[picked.index]);
+    await wait(250);
+    const current = normalize(read(element));
+    const stillOpen = visibleOptions(element).length > 0;
+    if (current && (current === normalize(texts[picked.index]) || current === normalize(value)) && !stillOpen) {
+      return { token: item.token, status: "filled", detail: `검색 결과에서 선택 · ${picked.reason}`, expected: read(element) };
+    }
+    return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 선택했지만 화면에서 확인되지 않습니다. 확인하세요.` };
+  }
+
   function formattedValue(element, value) {
     if (!(element instanceof HTMLInputElement)) return value;
     const digits = value.replace(/\D/g, "");
@@ -80,12 +147,13 @@
     return value;
   }
 
-  function fillOne(item) {
+  async function fillOne(item) {
     const element = elements.get(item.token);
     if (!element?.isConnected) return { token: item.token, status: "skipped", detail: "필드가 바뀌었습니다. 다시 분석하세요." };
     const value = String(item.value ?? "").trim();
     if (!value) return { token: item.token, status: "skipped", detail: "저장된 값 없음" };
     try {
+      if (isSearchInput(element)) return await fillSearch(item, element, value);
       let expected = formattedValue(element, value);
       if (element instanceof HTMLSelectElement) {
         const match = [...element.options].find(option => option.value === value || option.text.trim() === value);
@@ -100,14 +168,12 @@
         expected = element.value;
       } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
         setNativeValue(element, expected);
-        if (element.getAttribute("role") === "combobox" || element.hasAttribute("aria-autocomplete") || element.hasAttribute("list")) {
-          return { token: item.token, status: "review", detail: "검색형 입력입니다. 표시된 결과를 직접 선택하고 확인하세요." };
-        }
       } else if (element.isContentEditable) {
         element.textContent = value;
         element.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" }));
       } else return { token: item.token, status: "skipped", detail: "지원하지 않는 입력 방식" };
-      return { token: item.token, status: read(element) === expected ? "filled" : "failed", detail: read(element) === expected ? "입력값 확인" : "화면에서 값이 확인되지 않습니다." };
+      const ok = read(element) === expected;
+      return { token: item.token, status: ok ? "filled" : "failed", detail: ok ? "입력값 확인" : "화면에서 값이 확인되지 않습니다.", expected };
     } catch (error) {
       return { token: item.token, status: "failed", detail: error.message };
     }
@@ -116,14 +182,16 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.action === "scan") sendResponse({ fields: scan(), url: location.href });
     if (message.action === "fill") {
-      const results = message.items.map(fillOne);
-      // Controlled inputs can rerender after an event. Verify once more after the page settles.
-      setTimeout(() => {
+      (async () => {
+        // One at a time: search lists from different fields would otherwise overlap.
+        const results = [];
+        for (const item of message.items) results.push(await fillOne(item));
+        // Controlled inputs can rerender after an event. Verify once more after the page settles.
+        await wait(350);
         for (const result of results) {
           if (result.status !== "filled") continue;
           const element = elements.get(result.token);
-          const expected = formattedValue(element, String(message.items.find(item => item.token === result.token).value));
-          if (!element?.isConnected || (element instanceof HTMLSelectElement ? element.options[element.selectedIndex]?.text.trim() !== expected && element.value !== expected : read(element) !== expected)) {
+          if (!element?.isConnected || read(element) !== result.expected) {
             result.status = "failed";
             result.detail = "입력 후 페이지 상태가 바뀌었습니다.";
           }
@@ -132,7 +200,7 @@
           .filter(element => visible(element) && (element.getAttribute("aria-invalid") === "true" || (element.required && !element.checkValidity())))
           .map(element => labelFor(element) || element.name || "설명 없는 필수 항목");
         sendResponse({ results, invalidFields });
-      }, 350);
+      })();
       return true;
     }
     return false;

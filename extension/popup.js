@@ -94,7 +94,7 @@ document.getElementById("scan").addEventListener("click", async () => {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !/^https?:\/\//.test(tab.url || "")) throw new Error("지원서 웹 페이지에서 실행하세요.");
     tabId = tab.id;
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["option-match.js", "content.js"] });
     const scanResult = await send("scan");
     fields = scanResult.fields;
     pageUrl = scanResult.url;
@@ -143,7 +143,7 @@ fillButton.addEventListener("click", async () => {
     for (const result of results) {
       const field = fields.find(field => field.token === result.token);
       const row = document.createElement("p");
-      row.textContent = `${result.status === "filled" ? "✓" : "!"} ${field?.label || field?.name || result.token}: ${result.detail}`;
+      row.textContent = `${result.status === "filled" ? "✓" : result.status === "review" ? "?" : "!"} ${field?.label || field?.name || result.token}: ${result.detail}`;
       report.append(row);
     }
     if (invalidFields.length) {
@@ -151,7 +151,8 @@ fillButton.addEventListener("click", async () => {
       row.textContent = `미완료/검증 오류: ${invalidFields.join(", ")}`;
       report.append(row);
     }
-    setStatus(`${results.filter(result => result.status === "filled").length}/${items.length}개 입력 확인. 내용을 확인한 뒤 직접 제출하세요.`);
+    const reviewCount = results.filter(result => result.status === "review").length;
+    setStatus(`${results.filter(result => result.status === "filled").length}/${items.length}개 입력 확인${reviewCount ? ` · ${reviewCount}개 직접 선택 필요(?)` : ""}. 내용을 확인한 뒤 직접 제출하세요.`);
   } catch (error) { setStatus(`입력 실패: ${error.message}`); }
   fillButton.disabled = false;
 });

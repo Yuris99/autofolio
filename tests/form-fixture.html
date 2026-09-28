@@ -2,9 +2,37 @@
 <html lang="ko">
 <meta charset="utf-8">
 <title>AutoFolio 브라우저 검증</title>
+<style>.results { position: absolute; background: #fff; border: 1px solid #999; margin: 0; padding: 0; list-style: none; }</style>
 <script>
   let listener;
   window.chrome = { runtime: { onMessage: { addListener(callback) { listener = callback; } } } };
+
+  // A search box like the school/certificate finders on hiring sites: results arrive
+  // after a delay, and an item is chosen on mousedown before the input blurs.
+  function searchBox(input, items) {
+    const list = document.getElementById(input.getAttribute("aria-controls"));
+    input.addEventListener("input", () => {
+      list.replaceChildren();
+      list.hidden = true;
+      const query = input.value.replace(/\s/g, "");
+      setTimeout(() => {
+        if (!query) return;
+        for (const item of items.filter(item => item.replace(/\s/g, "").includes(query.slice(0, 2)))) {
+          const option = document.createElement("li");
+          option.setAttribute("role", "option");
+          option.textContent = item;
+          option.addEventListener("mousedown", event => {
+            event.preventDefault();
+            input.value = item;
+            input.dataset.chosen = item;
+            list.hidden = true;
+          });
+          list.append(option);
+        }
+        list.hidden = !list.children.length;
+      }, 200);
+    });
+  }
 </script>
 <fieldset>
   <legend>인적사항</legend>
@@ -15,9 +43,21 @@
   <legend>학력</legend>
   <label>졸업일 <input name="graduation" type="date"></label>
   <label>학교명 <select name="school"><option value="">선택</option><option value="SSU">숭실대학교</option></select></label>
+  <label>대학교 검색 <input name="school_search" role="combobox" aria-autocomplete="list" aria-controls="school-results"></label>
+  <ul id="school-results" class="results" role="listbox" hidden></ul>
+  <label>전공 <input name="major_search" list="majors"></label>
+  <datalist id="majors"><option value="소프트웨어학부"><option value="소프트웨어공학과"></datalist>
 </fieldset>
+<fieldset>
+  <legend>자격증</legend>
+  <label>자격증명 <input name="cert_search" role="combobox" aria-autocomplete="list" aria-controls="cert-results"></label>
+  <ul id="cert-results" class="results" role="listbox" hidden></ul>
+</fieldset>
+<script src="../extension/option-match.js"></script>
 <script src="../extension/content.js"></script>
 <script>
+  searchBox(document.querySelector('[name="school_search"]'), ["숭실사이버대학교", "숭실대학교(본교)"]);
+  searchBox(document.querySelector('[name="cert_search"]'), ["정보처리기사(필기)", "정보처리기사(실기)", "정보처리산업기사"]);
   const result = {};
   listener({ action: "scan" }, null, response => { result.scan = response; });
   const byName = Object.fromEntries(result.scan.fields.map(field => [field.name, field.token]));
@@ -25,11 +65,19 @@
     { token: byName.applicant_name, value: "홍길동" },
     { token: byName.email, value: "hong@example.com" },
     { token: byName.graduation, value: "2024.02.20" },
-    { token: byName.school, value: "숭실대학교" }
+    { token: byName.school, value: "숭실대학교" },
+    { token: byName.school_search, value: "숭실대학교" },
+    { token: byName.major_search, value: "소프트웨어 학부" },
+    { token: byName.cert_search, value: "정보처리기사" }
   ] }, null, response => {
-    const passed = response.results.every(item => item.status === "filled") &&
+    const status = Object.fromEntries(response.results.map(item => [item.token, item.status]));
+    const passed = ["applicant_name", "email", "graduation", "school", "school_search", "major_search"].every(name => status[byName[name]] === "filled") &&
+      status[byName.cert_search] === "review" &&
       document.querySelector('[name="graduation"]').value === "2024-02-20" &&
-      document.querySelector('[name="school"]').value === "SSU";
+      document.querySelector('[name="school"]').value === "SSU" &&
+      document.querySelector('[name="school_search"]').dataset.chosen === "숭실대학교(본교)" &&
+      document.querySelector('[name="major_search"]').value === "소프트웨어학부" &&
+      !document.querySelector('[name="cert_search"]').dataset.chosen;
     document.body.dataset.testResult = passed ? "PASS" : "FAIL";
     document.body.dataset.testDetails = JSON.stringify(response.results);
   });
