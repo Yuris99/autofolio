@@ -165,23 +165,40 @@
       event.preventDefault();
       const query = input.value.replace(/\s/g, "").toLowerCase();
       setTimeout(() => {
-        const ul = document.createElement("ul");
         const found = items.filter(item => item.replace(/\s/g, "").toLowerCase().includes(query));
+        const pick = item => {
+          row.querySelector('input[type="hidden"][name$="Name"]').value = item;
+          row.querySelector('input.hidden[data-rel-id]').value = String(items.indexOf(item) + 1);
+          row.querySelector(".searchResultName").textContent = item;
+          input.value = "";
+          list.replaceChildren();
+          const relId = row.querySelector("[data-rel-id]").dataset.relId;
+          document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
+        };
+        // Two result markups: <ul><li><a> for certificates; styled <div>s with a pointer cursor for exams.
+        if (input.dataset.type === "foreignExam") {
+          const wrap = document.createElement("div");
+          wrap.className = "resultWrap";
+          for (const item of found) {
+            const div = document.createElement("div");
+            div.className = "item";
+            div.style.cursor = "pointer";
+            div.innerHTML = `<span class="name"></span><span class="code">${items.indexOf(item) + 1}</span>`;
+            div.querySelector(".name").textContent = item;
+            div.querySelector(".code").hidden = true;
+            div.addEventListener("click", () => pick(item));
+            wrap.append(div);
+          }
+          list.replaceChildren(wrap);
+          return;
+        }
+        const ul = document.createElement("ul");
         for (const item of found) {
           const li = document.createElement("li");
           const link = document.createElement("a");
           link.href = "#";
           link.textContent = item;
-          link.addEventListener("click", clickEvent => {
-            clickEvent.preventDefault();
-            row.querySelector('input[type="hidden"][name$="Name"]').value = item;
-            row.querySelector('input.hidden[data-rel-id]').value = String(items.indexOf(item) + 1);
-            row.querySelector(".searchResultName").textContent = item;
-            input.value = "";
-            list.replaceChildren();
-            const relId = row.querySelector("[data-rel-id]").dataset.relId;
-            document.querySelectorAll(`[data-rel-target="${relId}"]`).forEach(field => { field.disabled = false; });
-          });
+          link.addEventListener("click", clickEvent => { clickEvent.preventDefault(); pick(item); });
           li.append(link);
           ul.append(li);
         }

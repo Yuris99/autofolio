@@ -39,7 +39,12 @@
     if (!node) return "";
     const parts = [];
     const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
-      acceptNode: text => text.parentElement?.closest(CONTROLS) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+      // Skip text inside controls, and hidden text such as a result's code kept in a hidden <span>.
+      acceptNode: text => {
+        const parent = text.parentElement;
+        if (!parent || parent.closest(CONTROLS) || parent.closest("[hidden], [aria-hidden='true']")) return NodeFilter.FILTER_REJECT;
+        return getComputedStyle(parent).display === "none" ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      }
     });
     while (walker.nextNode()) parts.push(walker.currentNode.nodeValue);
     return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 120);
@@ -258,16 +263,38 @@
     for (let depth = 0; node && depth < 3; depth++, node = node.parentElement) {
       const lists = [...node.querySelectorAll("[class*='result' i], [class*='suggest' i], [class*='autocomplete' i], [role='listbox']")]
         .filter(list => !list.contains(element) && !/name/i.test(list.className));
-      if (lists.length) return lists;
+      // A wrapper inside a result list ("searchResult > resultWrap") is the same list.
+      const outer = lists.filter(list => !lists.some(other => other !== list && other.contains(list)));
+      if (outer.length) return outer;
     }
     return [];
   }
 
   // The clickable part of each result: the link or button inside a row, or the row itself.
   function resultItems(list) {
+    const usable = item => visible(item) && item.getAttribute("aria-disabled") !== "true" && textOf(item);
     const rows = [...list.querySelectorAll("[role='option'], li, tr")];
-    const items = rows.length ? rows.map(row => row.querySelector("a, button") || row) : [...list.querySelectorAll("a, button")];
-    return items.filter(item => visible(item) && item.getAttribute("aria-disabled") !== "true" && textOf(item));
+    let items = (rows.length ? rows.map(row => row.querySelector("a, button") || row) : [...list.querySelectorAll("a, button")]).filter(usable);
+    if (items.length) return items;
+    // Results built from styled <div>/<span>: the outermost elements showing a pointer cursor...
+    const pointer = element => getComputedStyle(element).cursor === "pointer";
+    items = [...list.querySelectorAll("*")].filter(element => pointer(element) && !pointer(element.parentElement)).filter(usable);
+    if (items.length) return items;
+    // ...or else the repeated children under the list's single wrapper.
+    let node = list;
+    while (node.children.length === 1) node = node.children[0];
+    return [...node.children].filter(usable);
+  }
+
+  // For the diagnostic log when no result is found: tag names only, e.g. "div.searchResult 안 요소 4개 (ul > li.item > span)".
+  function describeResultLists(element) {
+    const tag = node => node.localName + (node.classList.length ? `.${[...node.classList].slice(0, 2).join(".")}` : "");
+    const lists = nearbyResultLists(element);
+    if (!lists.length) return "옆에 결과 목록이 없음";
+    return lists.slice(0, 2).map(list => {
+      const inside = [...list.querySelectorAll("*")];
+      return `${tag(list)} 안 요소 ${inside.length}개${inside.length ? ` (${inside.slice(0, 4).map(tag).join(" > ")})` : ""}`;
+    }).join("; ");
   }
 
   // Prefer the list the input names, then one beside it; fall back to suggestion lists anywhere on the page.
@@ -275,7 +302,7 @@
     const owned = ["aria-controls", "aria-owns"].flatMap(name => (element.getAttribute(name) || "").split(/\s+/))
       .map(id => id && document.getElementById(id)).filter(Boolean);
     if (owned.length) return owned.flatMap(resultItems);
-    const nearby = nearbyResultLists(element).flatMap(resultItems);
+    const nearby = [...new Set(nearbyResultLists(element).flatMap(resultItems))];
     if (nearby.length) return nearby;
     return [...document.querySelectorAll(OPTION_SELECTOR)]
       .filter(option => option !== element && visible(option) && option.getAttribute("aria-disabled") !== "true" && option.textContent.trim());
@@ -341,9 +368,11 @@
     let options = await waitForOptions(element, needsEnter ? 300 : 1200);
     if (!options.length) {
       pressEnter(element);
-      options = await waitForOptions(element, 3000);
+      options = await waitForOptions(element, 5000);
     }
-    if (!options.length) return { token: item.token, status: "review", detail: "검색 결과가 나타나지 않았습니다. 직접 검색해 선택하세요." };
+    if (!options.length) {
+      return { token: item.token, status: "review", detail: `검색 결과를 찾지 못했습니다 [${describeResultLists(element)}]. 직접 선택하세요.` };
+    }
 
     const texts = options.map(option => textOf(option));
     const picked = pickOption(value, texts);
