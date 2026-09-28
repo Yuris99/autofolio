@@ -197,7 +197,7 @@
     });
   }
   document.addEventListener("click", event => event.target.closest(".search label")?.closest(".search").classList.add("open"));
-  const searchItems = { foreignExam: ["TOEIC", "TOEIC Speaking", "TOEFL iBT"], license: ["정보처리기사", "정보처리산업기사", "정보처리기능사", "SQLD", "SQLP"] };
+  const searchItems = { foreignExam: ["TOEIC", "TOEIC Speaking", "TOEFL iBT"], license: ["정보처리기사", "정보처리산업기사", "정보처리기능사", "SQL개발자", "SQL전문가"] };
   for (const input of document.querySelectorAll("input[type='search']")) recruiterSearch(input, searchItems[input.dataset.type]);
 
   // "+" clones the first row as a fresh row N: names license[0] → license[N], values cleared,
@@ -290,7 +290,7 @@
     rowsGetTheirOwnEntry: searchBoxes("자격증검색").map(entry => entry.value).join() === "정보처리기사,SQLD",
     languageExamPicked: value("languageExam[0].languageExamName") === "TOEIC",
     licensesPicked: searchBoxes("자격증검색").every(entry => statusOf(entry.field.token) === "filled") &&
-      value("license[0].licenseName") === "정보처리기사" && value("license[1].licenseName") === "SQLD",
+      value("license[0].licenseName") === "정보처리기사" && value("license[1].licenseName") === "SQL개발자",
     newFieldsReported: response.newFields === 6,
     openedFieldsFilled: secondResponse.results.length === 6 && secondResponse.results.every(result => result.status === "filled") &&
       value("license[0].organization") === "한국산업인력공단" && value("license[0].registNumber") === "23201012345A" &&

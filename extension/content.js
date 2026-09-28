@@ -312,13 +312,14 @@
       .filter(option => option !== element && visible(option) && option.getAttribute("aria-disabled") !== "true" && option.textContent.trim());
   }
 
-  async function waitForOptions(element, ms) {
-    let options = [];
-    for (let waited = 0; waited < ms && !options.length; waited += 150) {
+  // Results from a previous search (stale) do not count until the list changes.
+  async function waitForOptions(element, ms, stale = []) {
+    for (let waited = 0; waited < ms; waited += 150) {
       await wait(150);
-      options = visibleOptions(element);
+      const options = visibleOptions(element);
+      if (options.length && options.some(option => !stale.includes(option))) return options;
     }
-    return options;
+    return [];
   }
 
   function pressEnter(element) {
@@ -365,33 +366,46 @@
       return { token: item.token, status: read(element) === texts[picked.index] ? "filled" : "failed", detail: `검색 목록에서 선택 · ${picked.reason}`, expected: texts[picked.index] };
     }
 
-    // Suggest-as-you-type lists appear on input; "type, then Enter" boxes need the key.
+    // Search by the saved name; if the site lists nothing like it, search again by its other
+    // names ("SQLD" → "SQL개발자"). An ambiguous list stops the search and goes to the user.
+    const { searchTerms } = globalThis.AutoFolioMatch;
     await openSearch(element);
-    typeInto(element, value);
     const needsEnter = /enter|엔터/i.test(`${element.placeholder} ${element.title}`);
-    let options = await waitForOptions(element, needsEnter ? 300 : 1200);
-    if (!options.length) {
-      pressEnter(element);
-      options = await waitForOptions(element, 5000);
+    let options = [];
+    let texts = [];
+    let picked = { index: -1, reason: "", candidates: [] };
+    const tried = [];
+    for (const term of searchTerms(value).slice(0, 3)) {
+      const stale = options;
+      tried.push(term);
+      typeInto(element, term);
+      options = await waitForOptions(element, needsEnter ? 300 : 1200, stale);
+      if (!options.length) {
+        pressEnter(element);
+        options = await waitForOptions(element, 5000, stale);
+      }
+      if (!options.length) continue;
+      texts = options.map(option => textOf(option));
+      picked = pickOption(value, texts);
+      if (picked.index >= 0 || picked.candidates.length) break;
     }
+    const searched = tried.length > 1 ? ` (검색어: ${tried.join(", ")})` : "";
     if (!options.length) {
-      return { token: item.token, status: "review", detail: `검색 결과를 찾지 못했습니다 [${describeResultLists(element)}]. 직접 선택하세요.` };
+      return { token: item.token, status: "review", detail: `검색 결과를 찾지 못했습니다${searched} [${describeResultLists(element)}]. 직접 선택하세요.` };
     }
-
-    const texts = options.map(option => textOf(option));
-    const picked = pickOption(value, texts);
     if (picked.index < 0) {
       // Show what the site listed, so a saved name that differs from the site's wording is easy to spot.
       const listed = picked.candidates.length ? picked.candidates : texts.slice(0, 3);
       const shown = listed.length ? ` (${picked.candidates.length ? "" : "결과: "}${listed.join(", ")}${!picked.candidates.length && texts.length > 3 ? " …" : ""})` : "";
-      return { token: item.token, status: "review", detail: `검색 결과: ${picked.reason}${shown}. 직접 선택하세요.` };
+      return { token: item.token, status: "review", detail: `검색 결과: ${picked.reason}${shown}${searched}. 직접 선택하세요.` };
     }
     choose(options[picked.index]);
     await wait(300);
     const stillOpen = visibleOptions(element).some(option => options.includes(option));
     if (!stillOpen && (shownNearby(element, texts[picked.index]) || normalize(read(element)) === normalize(value))) {
       // The box itself may be cleared after a pick, so the settle-time recheck is skipped (no expected).
-      return { token: item.token, status: "filled", detail: `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}` };
+      const check = picked.loose ? " · 비슷한 이름으로 골랐으니 확인하세요" : "";
+      return { token: item.token, status: "filled", detail: `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}${check}` };
     }
     return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 선택했지만 화면에서 확인되지 않습니다. 확인하세요.` };
   }
