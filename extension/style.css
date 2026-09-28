@@ -21,10 +21,15 @@ button.link { background: none; color: #2358d0; padding: 4px; }
 .field small { display: block; color: #667287; margin: 5px 0; }
 .field select { width: 100%; }
 .field input[type="checkbox"] { margin-right: 6px; }
-input:not([type="checkbox"]), select { border: 1px solid #aebacf; border-radius: 6px; padding: 8px; font: inherit; background: white; color: #182233; }
+textarea { resize: vertical; }
+input:not([type="checkbox"]), select, textarea { border: 1px solid #aebacf; border-radius: 6px; padding: 8px; font: inherit; background: white; color: #182233; }
 section { background: white; border: 1px solid #dce3ef; border-radius: 12px; padding: 18px; margin: 16px 0; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .grid label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.grid label.wide { grid-column: 1 / -1; }
+@media (max-width: 520px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.savebar { position: sticky; bottom: 0; padding: 12px 0; background: #f6f8fc; border-top: 1px solid #dce3ef; }
+.backup .actions { margin-bottom: 0; }
 .entry { border: 1px solid #e1e5ed; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
 .entry .grid { margin-bottom: 9px; }
 #report { margin: 12px 0; font-size: 13px; }

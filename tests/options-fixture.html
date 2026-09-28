@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>AutoFolio 이력 페이지 검증</title>
+<script>
+  // Stand-in for chrome.storage with one saved profile.
+  const store = { profile: { personal: { name: "홍길동" }, certificate: [{ name: "정보처리기사", obtainedDate: "2023.06.01" }] } };
+  window.chrome = { storage: { local: {
+    async get(key) { return { [key]: structuredClone(store[key]) }; },
+    async set(values) { Object.assign(store, structuredClone(values)); }
+  } } };
+</script>
+<main>
+  <button type="button" id="export">내려받기</button>
+  <button type="button" id="import">불러오기</button>
+  <input type="file" id="importFile" hidden>
+  <form id="profileForm"></form>
+  <button type="submit" form="profileForm">저장</button><span id="saved"></span>
+</main>
+<script type="module">
+  await import("../extension/options.js");
+  const form = document.getElementById("profileForm");
+  const group = name => form.querySelector(`[data-group="${name}"]`);
+  const checks = [];
+  checks.push(["8 sections", form.querySelectorAll("section").length === 8]);
+  checks.push(["saved name shown", group("personal").querySelector('[name="name"]').value === "홍길동"]);
+  checks.push(["saved certificate shown", group("certificate").querySelectorAll(".entry").length === 1]);
+
+  // Add a language score and a project with a long description, then save.
+  group("language").closest("section").querySelector("button:last-of-type").click();
+  const language = group("language").querySelector(".entry");
+  language.querySelector('[name="test"]').value = "TOEIC";
+  language.querySelector('[name="score"]').value = "900";
+  group("project").closest("section").querySelector("button:last-of-type").click();
+  const project = group("project").querySelector(".entry");
+  project.querySelector('[name="name"]').value = "AutoFolio";
+  project.querySelector('textarea[name="description"]').value = "지원서 자동 입력\n브라우저 확장";
+  group("certificate").querySelector(".entry button").click();
+  form.requestSubmit();
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  checks.push(["language saved", store.profile.language?.[0]?.score === "900"]);
+  checks.push(["long text saved", store.profile.project?.[0]?.description === "지원서 자동 입력\n브라우저 확장"]);
+  checks.push(["removed entry gone", store.profile.certificate?.length === 0]);
+  checks.push(["name kept", store.profile.personal?.name === "홍길동"]);
+  checks.push(["status shown", document.getElementById("saved").textContent === "저장했습니다."]);
+  const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
+  document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
+  document.body.dataset.testDetails = JSON.stringify(failed);
+</script>
+</html>

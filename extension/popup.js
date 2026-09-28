@@ -1,4 +1,4 @@
-import { allValues, classify, FIELD_TYPES } from "./matcher.js";
+import { allValues, classify, describeType, FIELD_TYPES } from "./matcher.js";
 
 const fieldsRoot = document.getElementById("fields");
 const status = document.getElementById("status");
@@ -30,7 +30,8 @@ function valueSelect(values, selected) {
   for (const item of values) {
     const option = document.createElement("option");
     option.value = item.key;
-    option.textContent = `${item.type} — ${item.label}`;
+    const text = `${describeType(item.type)} — ${item.label}`;
+    option.textContent = text.length > 80 ? `${text.slice(0, 79)}…` : text;
     select.append(option);
   }
   select.value = selected || "";
@@ -38,15 +39,7 @@ function valueSelect(values, selected) {
 }
 
 async function layaClassify(field) {
-  const descriptions = {
-    "personal.name": "지원자 본인 이름", "personal.email": "지원자 이메일 주소",
-    "personal.phone": "지원자 휴대전화 번호", "personal.address": "지원자 거주지 주소",
-    "education.school": "학력의 학교명", "education.major": "학력의 전공 또는 학과",
-    "education.startDate": "학교 입학 날짜", "education.graduationDate": "학교 졸업 날짜",
-    "education.gpa": "학교 성적 또는 학점", "certificate.name": "자격증 이름 또는 종목",
-    "certificate.obtainedDate": "자격증 취득 날짜", "certificate.issuer": "자격증 발급 기관"
-  };
-  const criteria = Object.fromEntries(FIELD_TYPES.map(type => [type, descriptions[type]]));
+  const criteria = Object.fromEntries(FIELD_TYPES.map(type => [type, `지원자 ${describeType(type)}`]));
   criteria.unknown = "어느 이력 항목인지 알 수 없음";
   const response = await fetch("http://127.0.0.1:8000/v1/systemone", {
     method: "POST",
