@@ -1,5 +1,6 @@
-import { allValues, classify, describeType, FIELD_TYPES } from "./matcher.js";
+import { allValues, classify, describeType, FIELD_TYPES, PROFILE_SCHEMA } from "./matcher.js";
 import { addFill, createRun, saveRun, summarize } from "./run-log.js";
+import { defaultChoice, rowsToAdd } from "./plan.js";
 
 const fieldsRoot = document.getElementById("fields");
 const status = document.getElementById("status");
@@ -82,13 +83,12 @@ function render(values, suggestions) {
     wrapper.className = "field";
     const label = document.createElement("label");
     label.textContent = field.label || field.ariaLabel || field.placeholder || field.name || "설명 없는 입력칸";
+    if (field.loop?.rows > 1) label.textContent += ` (${field.loop.index + 1}번째)`;
     const note = document.createElement("small");
     const suggestion = suggestions.get(field.token);
     note.textContent = [field.section, field.inputType, suggestion?.reason].filter(Boolean).join(" · ");
     const candidates = values.filter(item => item.type === suggestion?.type);
-    const group = suggestion?.type?.split(".")[0];
-    const sameEntry = candidates.find(item => item.key === `${suggestion?.type}:${lastEntries[group]}`);
-    const chosen = candidates.length === 1 ? candidates[0].key : sameEntry?.key || "";
+    const chosen = defaultChoice(field, suggestion?.type, candidates, lastEntries);
     const select = valueSelect(values, chosen);
     wrapper.append(label, note, select);
     fieldsRoot.append(wrapper);
@@ -112,16 +112,26 @@ document.getElementById("scan").addEventListener("click", async () => {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" }).catch(() => {});
     await chrome.scripting.executeScript({ target: { tabId }, files: ["option-match.js", "content.js"] });
     ({ lastEntries = {} } = await sessionStore.get("lastEntries"));
-    const scanResult = await send("scan");
-    fields = scanResult.fields;
-    pageUrl = scanResult.url;
     const { profile = {}, siteMappings = {} } = await chrome.storage.local.get(["profile", "siteMappings"]);
     const values = allValues(profile);
-    const suggestions = new Map(fields.map(field => [field.token,
-      FIELD_TYPES.includes(siteMappings[fieldKey(field)])
-        ? { type: siteMappings[fieldKey(field)], reason: "이전에 확인한 매핑" }
-        : classify(field)
-    ]));
+    const analyse = async () => {
+      const scanResult = await send("scan");
+      fields = scanResult.fields;
+      pageUrl = scanResult.url;
+      return new Map(fields.map(field => [field.token,
+        FIELD_TYPES.includes(siteMappings[fieldKey(field)])
+          ? { type: siteMappings[fieldKey(field)], reason: "이전에 확인한 매핑" }
+          : classify(field)
+      ]));
+    };
+    let suggestions = await analyse();
+    // One row per saved entry: press the page's "+" where a repeating block has fewer rows.
+    const addedRows = [];
+    for (const plan of rowsToAdd(fields, field => suggestions.get(field.token)?.type, profile)) {
+      const { added } = await send("addRows", { key: plan.key, times: plan.times });
+      if (added) addedRows.push(`${PROFILE_SCHEMA.find(group => group.group === plan.group).label} ${added}줄`);
+    }
+    if (addedRows.length) suggestions = await analyse();
     let modelCount = 0;
     let layaError = "";
     if (layaToggle.checked) {
@@ -140,7 +150,8 @@ document.getElementById("scan").addEventListener("click", async () => {
     if (layaError) currentRun.notes.push(layaError);
     await recordRun(currentRun);
     if (layaError) { setStatus(`${layaError}. 규칙 결과를 표시합니다.`); return; }
-    setStatus(`입력칸 ${fields.length}개 · 저장된 값 ${values.length}개 · Laya 제안 ${modelCount}개. 아래 매핑을 확인하세요.`);
+    const rowsNote = addedRows.length ? ` · + 버튼으로 ${addedRows.join(", ")} 추가` : "";
+    setStatus(`입력칸 ${fields.length}개 · 저장된 값 ${values.length}개 · Laya 제안 ${modelCount}개${rowsNote}. 아래 매핑을 확인하세요.`);
   } catch (error) { setStatus(error.message); }
 });
 

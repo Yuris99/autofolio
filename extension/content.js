@@ -63,6 +63,54 @@
   }
 
   // One field per radio group: its question, not any single choice, is what gets classified.
+  // Repeating rows ("자격증 +"): <div class="row loop" data-loop="license">…<button data-button="add">.
+  const LOOP_CLASS = /(^|\s)(loop|repeat|repeater)(\s|$)/i;
+  function loopRow(element) {
+    return element.closest("[data-loop]") || [...ancestors(element)].find(node => LOOP_CLASS.test(node.className || "")) || null;
+  }
+  function* ancestors(element) {
+    for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) yield node;
+  }
+  function loopKey(row) {
+    return row.dataset.loop || String(row.className).trim();
+  }
+  function loopRows(row) {
+    const key = loopKey(row);
+    return [...(row.parentElement?.children || [])].filter(node => loopKey(node) === key && node.getClientRects().length);
+  }
+  function addButton(row) {
+    return [...row.querySelectorAll("button, a, [role='button']")].find(button =>
+      button.matches("[data-button='add'], .btn-add, .add") || /^\s*(\+|추가)\s*$/.test(button.textContent) ||
+      /추가|add/i.test(button.getAttribute("aria-label") || button.title || "")) || null;
+  }
+  function loopInfo(element) {
+    const row = loopRow(element);
+    if (!row) return null;
+    const rows = loopRows(row);
+    return { key: loopKey(row), index: Math.max(0, rows.indexOf(row)), rows: rows.length, canAdd: Boolean(addButton(row)) };
+  }
+
+  // Press the last row's add button until there are `times` more rows. Never touches remove/reset.
+  async function addRows(key, times) {
+    let added = 0;
+    for (let i = 0; i < times; i++) {
+      const rows = [...document.querySelectorAll("[data-loop], [class]")].filter(node => loopKey(node) === key && node.getClientRects().length);
+      const last = rows.at(-1);
+      const button = last && addButton(last);
+      if (!button) break;
+      button.click();
+      let now = rows.length;
+      for (let waited = 0; waited < 1500 && now <= rows.length; waited += 100) {
+        await wait(100);
+        now = [...document.querySelectorAll("[data-loop], [class]")].filter(node => loopKey(node) === key && node.getClientRects().length).length;
+      }
+      if (now <= rows.length) break;
+      added++;
+    }
+    log(`반복 항목 ${key}: ${added}줄 추가`);
+    return added;
+  }
+
   function radioGroup(element) {
     if (!element.name) return [element];
     const scope = element.form || document;
@@ -157,7 +205,8 @@
         id: element.id || "",
         inputType,
         required: element.required || element.getAttribute("aria-required") === "true" || Boolean(radios?.some(radio => radio.required)),
-        options: options.slice(0, 80)
+        options: options.slice(0, 80),
+        loop: loopInfo(element)
       });
     }
     return fields;
@@ -375,6 +424,10 @@
       log(`입력칸 ${fields.length}개 분석`);
       console.table?.(fields.map(({ token, label, section, name, inputType, required }) => ({ token, label, section, name, inputType, required })));
       sendResponse({ fields, url: location.href });
+    }
+    if (message.action === "addRows") {
+      addRows(message.key, Math.min(message.times, 10)).then(added => sendResponse({ added }));
+      return true;
     }
     if (message.action === "fill") {
       (async () => {
