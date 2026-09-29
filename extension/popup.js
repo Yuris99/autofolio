@@ -1,6 +1,6 @@
 import { allValues, classify, describeType, FIELD_TYPES, PROFILE_SCHEMA, rank } from "./matcher.js";
 import { addFill, createRun, saveRun, summarize } from "./run-log.js";
-import { combineRanks, defaultChoice, fieldId, followUpItems, refineRanks, rowsToAdd } from "./plan.js";
+import { combineRanks, defaultChoice, fieldId, followUpItems, layaCriteria, refineRanks, rowsToAdd } from "./plan.js";
 
 const fieldsRoot = document.getElementById("fields");
 const status = document.getElementById("status");
@@ -95,8 +95,7 @@ function layaState(field, index) {
 
 // Laya's probability for every profile item (and "unknown") for one field.
 async function layaProbabilities(field, index) {
-  const criteria = Object.fromEntries(FIELD_TYPES.map(type => [type, `지원자 ${describeType(type)}`]));
-  criteria.unknown = "이력 항목이 아님, 또는 알 수 없음";
+  const criteria = layaCriteria();
   const response = await fetch(LAYA_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -131,7 +130,7 @@ function render(values, suggestions) {
     // The best-ranked candidate that has a clear saved value starts selected.
     const withLevel = { ...field, level: suggestion.level };
     let chosen = "";
-    for (const candidate of suggestion.candidates) {
+    for (const candidate of suggestion.candidates.filter(candidate => !candidate.layaOnly)) {
       chosen = defaultChoice(withLevel, candidate.type, values.filter(item => item.type === candidate.type), lastEntries);
       if (chosen) break;
     }

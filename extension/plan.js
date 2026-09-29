@@ -1,4 +1,4 @@
-import { DATED_GROUPS, matchGroup, onlyTitle, PROFILE_SCHEMA, splitName, variants } from "./matcher.js";
+import { DATED_GROUPS, describeType, FIELD_TYPES, matchGroup, onlyTitle, PROFILE_SCHEMA, splitName, variants } from "./matcher.js";
 
 // Decisions the popup makes between analysing and filling, kept free of DOM so tests can use them.
 const LIST_GROUPS = new Set(PROFILE_SCHEMA.filter(group => !group.single).map(group => group.group));
@@ -150,15 +150,33 @@ export function refineRanks(fields, ranks) {
   return { ranks: out, levels };
 }
 
+// What Laya chooses from: every profile item, plus common fields that are not profile items. Without
+// these, a region list ("소재지") or a campus choice has nowhere to go but the nearest item (학교명).
+export const NOT_PROFILE_CHOICES = {
+  "none.location": "학교·회사의 소재지나 지역 선택",
+  "none.campus": "본교·분교, 캠퍼스 구분",
+  "none.dayNight": "주간·야간 구분",
+  "none.admission": "입학·편입 구분, 졸업·졸업예정·수료·중퇴 같은 학적 상태",
+  "none.category": "계열·학부 구분 목록, 학위 종류",
+  "none.statement": "본인이 직접 확인하거나 동의하는 체크 항목",
+  "none.otherPerson": "추천인·가족·비상연락처 등 다른 사람의 정보",
+  "none.application": "지원 분야, 희망 연봉, 입사 가능일, 자기소개 등 지원마다 다른 답",
+  unknown: "그 밖에 이력 항목이 아니거나 알 수 없음"
+};
+export function layaCriteria() {
+  return { ...Object.fromEntries(FIELD_TYPES.map(type => [type, `지원자 ${describeType(type)}`])), ...NOT_PROFILE_CHOICES };
+}
+
 // Rules' ranking mixed with Laya's probabilities (type → 0..1): each side is a share of 1, and
 // `weight` is how much Laya counts. Without probabilities the rules' order stays as it is.
+// Items only Laya suggests are marked layaOnly: shown, but not picked for the user.
 export function combineRanks(list, probabilities, weight = 0.5) {
   if (!probabilities) return list;
   const total = list.reduce((sum, entry) => sum + entry.score, 0) || 1;
   const merged = new Map(list.map(entry => [entry.type, { ...entry, score: (1 - weight) * entry.score / total }]));
   for (const [type, probability] of Object.entries(probabilities)) {
-    if (type === "unknown" || probability < 0.05) continue;
-    const entry = merged.get(type) || { type, score: 0, reasons: [] };
+    if (!FIELD_TYPES.includes(type) || probability < 0.05) continue;
+    const entry = merged.get(type) || { type, score: 0, reasons: [], layaOnly: true };
     entry.score += weight * probability;
     entry.reasons = [...entry.reasons, `Laya ${Math.round(probability * 100)}%`];
     merged.set(type, entry);

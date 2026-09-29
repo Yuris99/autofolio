@@ -23,13 +23,15 @@ laya-serve
 | `LAYA_MODELS`, `LAYA_THREADS` | 사용할 모델, CPU 스레드 수 |
 | `LAYA_API_KEY` | 요청에 키를 요구함. **AutoFolio는 키를 보내지 않으므로 설정하지 않는다** |
 
-Windows PowerShell 예:
+Windows에서는 저장소의 스크립트로 실행한다. 아래 두 오류를 피하는 설정이 들어 있다.
 
 ```powershell
-$env:LAYA_DEVICE = "cuda"; $env:LAYA_PRELOAD = "1"; laya-serve
+powershell -ExecutionPolicy Bypass -File tools\laya-serve.ps1
 ```
 
-처음 실행하면 모델을 내려받는 데 시간이 걸릴 수 있다. 이 문서는 공개 문서를 바탕으로 정리했다. 이 PC에서 직접 설치해 돌려 보지는 않았다.
+- 따로 있던 `laya-serve` PyPI 패키지는 아카이브됐다. 서버는 `laya` 본체에 들어 있으므로 `pip install "laya[serve]"`로 설치한다. 명령 이름(`laya-serve`)과 주소는 같다.
+- 처음 실행하면 Hugging Face에서 모델(`convaiinnovations/laya`)을 내려받는다.
+- 2026-09-29, 이 PC(Windows, GPU 없음, laya 0.3.21)에서 확인했다. 시작에 약 30초가 걸리고, 요청은 첫 번째가 0.9초, 이후 칸당 평균 55ms였다.
 
 ## AutoFolio에서 켜기
 
@@ -60,14 +62,16 @@ $env:LAYA_DEVICE = "cuda"; $env:LAYA_PRELOAD = "1"; laya-serve
         "personal.name": "지원자 인적사항의 이름",
         "personal.zipCode": "지원자 인적사항의 우편번호",
         "…": "이력 항목마다 하나 (matcher.js의 PROFILE_SCHEMA)",
-        "unknown": "이력 항목이 아님, 또는 알 수 없음"
+        "none.location": "학교·회사의 소재지나 지역 선택",
+        "…": "이력이 아닌 흔한 칸 (NOT_PROFILE_CHOICES)",
+        "unknown": "그 밖에 이력 항목이 아니거나 알 수 없음"
       }
     }
   }
 }
 ```
 
-- 선택지는 이력 항목 약 50개와 `unknown`이다. laya-serve는 질문 하나에 선택지를 최대 100개까지 받는다.
+- 선택지는 이력 항목 약 50개와 "이력 아님" 선택지 9개(`NOT_PROFILE_CHOICES`, `unknown` 포함)다. laya-serve는 질문 하나에 선택지를 최대 100개까지 받는다.
 - `options`는 선택창·라디오의 선택지 글자 최대 12개다. `nearby`는 앞뒤 칸의 라벨이다.
 
 ## 받는 내용과 쓰는 방법
@@ -84,7 +88,7 @@ $env:LAYA_DEVICE = "cuda"; $env:LAYA_PRELOAD = "1"; laya-serve
 ```
 
 - **규칙 점수 비율:** 칸의 후보 점수를 합이 1이 되게 나눈 값이다.
-- **Laya가 더한 후보:** 규칙에 없던 후보도 Laya 확률이 5% 이상이면 들어간다. `unknown`은 후보로 넣지 않는다.
+- **Laya가 더한 후보:** 규칙에 없던 후보도 Laya 확률이 5% 이상이면 들어간다. 다만 자동 선택은 하지 않는다. "이력 아님" 선택지는 후보로 넣지 않는다.
 - **응답 형식이 다를 때:** `probabilities`가 없고 `choice`만 오면 그 항목을 확률 1로 본다.
 
 ## 규칙 점수 (Laya 없이도 쓰는 부분)
@@ -106,11 +110,31 @@ $env:LAYA_DEVICE = "cuda"; $env:LAYA_PRELOAD = "1"; laya-serve
   - 같은 라벨의 두 번째 기간 칸은 종료일로, 두 번째 주소 칸은 상세주소로 본다.
 - **추천 표시:** 팝업은 후보 상위 3개(`TOP_CANDIDATES`)의 저장 값을 "추천 순위"로 먼저 보여 준다. 저장 값이 있는 가장 높은 후보를 기본으로 고른다.
 
+## 실제로 써 본 결과 (incruit.com 기록, 2026-09-29)
+
+칸 135개를 보냈을 때의 결과다.
+
+| 경우 | 칸 수 |
+| --- | --- |
+| 규칙에 답이 있고 Laya 1순위가 정확히 같음 | 11 |
+| 그룹만 같음 (부서·직위·날짜를 모두 "회사명"으로 답하는 식) | 19 |
+| 그룹부터 다름 | 42 |
+| 규칙에 답이 없고 Laya도 "이력 아님" | 45 |
+| 규칙에 답이 없는데 Laya가 이력 항목을 제안 | 18 |
+
+- **판단:** Laya는 "이력 칸인지 아닌지"는 잘 가르지만, 세부 항목은 규칙보다 부정확하다. 가중치 0.5에서 최종 선택이 바뀐 칸은 없었다.
+- **이력 아님 선택지:** 선택지에 소재지·본분교·주야·학적 상태·동의 체크·다른 사람 정보 같은 "이력 아님" 항목(`plan.js`의 `NOT_PROFILE_CHOICES`)을 넣는다. 이게 없으면 Laya는 소재지 목록도 "학교명"(99%)으로 답했다.
+- **Laya만 제안한 항목:** 규칙에 없고 Laya만 제안한 항목은 추천 목록에 보여 주기만 하고 자동으로 고르지 않는다.
+
 ## 가중치 조정
 
 진단 기록에는 칸마다 상위 후보 3개와 비율(`candidates`), 사용자가 실제로 고른 항목(`chosen`)이 남는다. 기록이 쌓이면 이것을 정답 데이터로 삼아 `WEIGHTS`와 `LAYA_WEIGHT`를 맞출 수 있다. 예를 들어 1순위가 틀렸을 때 정답이 몇 순위였는지, 그리고 Laya를 켰을 때와 껐을 때 정답률이 어떻게 다른지 비교한다.
 
 ## 문제 해결
+
+- **`UnicodeDecodeError: 'cp949' codec can't decode …` (torch/_inductor):** 한국어 Windows의 기본 인코딩(cp949)으로 PyTorch 파일을 읽다가 난다. `PYTHONUTF8=1`로 실행한다. 스크립트에 들어 있다.
+- **`OSError: [WinError 1314] 클라이언트가 필요한 권한을 가지고 있지 않습니다` (huggingface_hub, symlink):** 모델을 받는 중에 심볼릭 링크를 만들 권한이 없어서 난다. 한 번 더 실행하면 링크 대신 복사로 받는다. 계속 나면 Windows 개발자 모드를 켠다.
+- **`this checkpoint ships invalid temperatures` 경고:** 모델 쪽 보정값 경고라 무시해도 된다. 대신 Laya가 알려 주는 confidence는 보정되지 않은 값으로 본다.
 
 - **"Laya 연결 실패":** 서버가 떠 있는지, 포트가 8000인지 확인한다. 실패하면 그때까지 받은 칸만 Laya를 반영하고, 나머지는 규칙 순위를 표시한다.
 - **401/403 응답:** `LAYA_API_KEY`를 설정했다면 끈다.
