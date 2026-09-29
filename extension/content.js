@@ -245,10 +245,23 @@
     range.setEndBefore(b);
     return range.toString().replace(/\s+/g, " ").trim();
   }
+  // Names ending in a part (BirthdateY/M/D, cHstartdateY/M, Name_en_first/last) join by name alone;
+  // named boxes whose names differ otherwise (cHstartdateM, HighschoolStartType) never join.
+  const PART_SUFFIX = /(?:[_-]?(?:[Yy]ear|[Mm]onth|[Dd]ay|[Ff]irst|[Ll]ast|[Gg]iven|[Ff]amily)|[_-]?[YMD]|_[ymd])$/;
+  function stemOf(element) {
+    const name = element.getAttribute("name") || "";
+    const suffix = name.match(PART_SUFFIX);
+    return suffix ? { stem: name.slice(0, suffix.index), strong: true } : { stem: name.replace(/\d+$/, ""), strong: false };
+  }
   function joins(a, b) {
     if (!partKind(a) || !partKind(b)) return false;
     const box = a.closest("td, dd, li, .input-group, .form-group, .field") || a.parentElement?.parentElement;
     if (!box?.contains(b)) return false;
+    if (a.getAttribute("name") && b.getAttribute("name")) {
+      const [first, second] = [stemOf(a), stemOf(b)];
+      if (first.stem !== second.stem) return false;
+      if (first.strong && second.strong) return true;
+    }
     const own = element => [...(element.labels || [])].map(textOf).join(" ").replace(/[\s년월일]/g, "");
     if (own(b) && own(b) !== own(a)) return false;
     const between = betweenText(a, b);
@@ -260,7 +273,8 @@
     const flush = () => {
       const separated = run.slice(1).some((element, i) => betweenText(run[i], element));
       const short = run.every(element => element instanceof HTMLSelectElement || (element.maxLength > 0 && element.maxLength <= 4));
-      if (run.length >= 2 && run.length <= 4 && (separated || short)) run.forEach((element, index) => groups.set(element, { members: run, index }));
+      const named = run.every(element => stemOf(element).strong && stemOf(element).stem === stemOf(run[0]).stem);
+      if (run.length >= 2 && run.length <= 4 && (separated || short || named)) run.forEach((element, index) => groups.set(element, { members: run, index }));
       run = [];
     };
     for (const element of list) {
@@ -683,8 +697,22 @@
     return element.value === match.value;
   }
 
+  // English names over a family-name box and a given-name box: saved as "HONG GILDONG" (family first).
+  function nameParts(members, value) {
+    const names = members.map(element => element.getAttribute("name") || "");
+    const family = names.findIndex(name => /last|family|sur/i.test(name));
+    const given = names.findIndex(name => /first|given/i.test(name));
+    const words = value.split(/\s+/).filter(Boolean);
+    if (members.length !== 2 || family < 0 || given < 0 || words.length < 2 || /[^A-Za-z\s,'-]/.test(value)) return null;
+    const pieces = [];
+    pieces[family] = words[0].replace(/,$/, "");
+    pieces[given] = words.slice(1).join(" ");
+    return pieces.map((piece, index) => formattedValue(members[index], piece));
+  }
+
   async function fillParts(item, members, value) {
-    const pieces = globalThis.AutoFolioFormat.splitValue(value, members.map(element => ({ kind: partKind(element), maxLength: element.maxLength })));
+    const pieces = nameParts(members, value) ||
+      globalThis.AutoFolioFormat.splitValue(value, members.map(element => ({ kind: partKind(element), maxLength: element.maxLength })));
     if (!pieces) return { token: item.token, status: "review", detail: `칸 ${members.length}개로 나뉜 항목인데 값을 나누는 방법을 모르겠습니다. 직접 입력하세요.` };
     const failed = members.filter((element, index) => !setPart(element, pieces[index]));
     if (failed.length) return { token: item.token, status: "review", detail: `칸 ${members.length}개로 나눠 넣었지만 ${failed.length}개가 들어가지 않았습니다(목록에 없는 값). 확인하세요.` };
@@ -780,7 +808,8 @@
     const element = elements.get(item.token);
     const part = element && partOf.get(element);
     if (part) {
-      const pieces = globalThis.AutoFolioFormat.splitValue(item.value, part.members.map(member => ({ kind: partKind(member), maxLength: member.maxLength })));
+      const pieces = nameParts(part.members, String(item.value)) ||
+        globalThis.AutoFolioFormat.splitValue(item.value, part.members.map(member => ({ kind: partKind(member), maxLength: member.maxLength })));
       return pieces ? pieces.join(" | ") : item.value;
     }
     return element && !isSearchInput(element) ? formattedValue(element, String(item.value)) : String(item.value);

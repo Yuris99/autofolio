@@ -1,6 +1,6 @@
-import { allValues, classify, describeType, FIELD_TYPES, PROFILE_SCHEMA } from "./matcher.js";
+import { allValues, classify, describeType, FIELD_TYPES, PROFILE_SCHEMA, rank } from "./matcher.js";
 import { addFill, createRun, saveRun, summarize } from "./run-log.js";
-import { defaultChoice, fieldId, followUpItems, rowsToAdd } from "./plan.js";
+import { combineRanks, defaultChoice, fieldId, followUpItems, refineRanks, rowsToAdd } from "./plan.js";
 
 const fieldsRoot = document.getElementById("fields");
 const status = document.getElementById("status");
@@ -43,38 +43,72 @@ async function send(action, payload = {}) {
   return chrome.tabs.sendMessage(tabId, { action, ...payload });
 }
 
-function valueSelect(values, selected) {
+// Candidate types shown on top of each list, and how much Laya counts against the rules.
+const TOP_CANDIDATES = 3;
+const LAYA_URL = "http://127.0.0.1:8000/v1/systemone";
+const LAYA_WEIGHT = 0.5;
+
+const share = (candidate, candidates) => candidate.score / (candidates.reduce((sum, item) => sum + item.score, 0) || 1);
+
+function optionFor(item, prefix = "") {
+  const option = document.createElement("option");
+  option.value = item.key;
+  const text = `${prefix}${describeType(item.type)} — ${item.label}`;
+  option.textContent = text.length > 80 ? `${text.slice(0, 79)}…` : text;
+  return option;
+}
+
+// Saved values for the top candidates first ("추천", with each candidate's share), then the rest.
+function valueSelect(values, selected, candidates) {
   const select = document.createElement("select");
   const empty = document.createElement("option");
   empty.value = "";
   empty.textContent = "채우지 않음 / 직접 선택";
   select.append(empty);
-  for (const item of values) {
-    const option = document.createElement("option");
-    option.value = item.key;
-    const text = `${describeType(item.type)} — ${item.label}`;
-    option.textContent = text.length > 80 ? `${text.slice(0, 79)}…` : text;
-    select.append(option);
+  const top = candidates.slice(0, TOP_CANDIDATES);
+  const recommended = top.flatMap(candidate => values.filter(item => item.type === candidate.type)
+    .map(item => ({ item, percent: Math.round(share(candidate, candidates) * 100) })));
+  if (recommended.length) {
+    const group = document.createElement("optgroup");
+    group.label = "추천 순위";
+    for (const { item, percent } of recommended) group.append(optionFor(item, `${percent}% · `));
+    select.append(group);
   }
+  const shown = new Set(recommended.map(({ item }) => item.key));
+  const rest = document.createElement("optgroup");
+  rest.label = "전체 이력";
+  for (const item of values) if (!shown.has(item.key)) rest.append(optionFor(item));
+  select.append(rest);
   select.value = selected || "";
   return select;
 }
 
-async function layaClassify(field) {
+// What Laya reads about a field: its own clues and its neighbours' labels. Never profile values.
+function layaState(field, index) {
+  const nearby = fields.slice(Math.max(0, index - 2), index + 3).filter(other => other !== field)
+    .map(other => other.label).filter(Boolean);
+  return {
+    section: field.section, label: field.label, placeholder: field.placeholder, title: field.title, name: field.name,
+    inputType: field.inputType, options: (field.options || []).slice(0, 12).map(option => option.text), nearby
+  };
+}
+
+// Laya's probability for every profile item (and "unknown") for one field.
+async function layaProbabilities(field, index) {
   const criteria = Object.fromEntries(FIELD_TYPES.map(type => [type, `지원자 ${describeType(type)}`]));
-  criteria.unknown = "어느 이력 항목인지 알 수 없음";
-  const response = await fetch("http://127.0.0.1:8000/v1/systemone", {
+  criteria.unknown = "이력 항목이 아님, 또는 알 수 없음";
+  const response = await fetch(LAYA_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      state: { section: field.section, label: field.label, placeholder: field.placeholder, name: field.name, inputType: field.inputType },
-      questions: { field: { type: "choice", instructions: "이 채용 지원서 입력칸에 해당하는 이력 항목은?", criteria } }
+      state: layaState(field, index),
+      questions: { field: { type: "choice", instructions: "이 채용 지원서 입력칸에 넣을 지원자 이력 항목은?", criteria } }
     })
   });
   if (!response.ok) throw new Error(`Laya 응답 ${response.status}`);
-  const data = await response.json();
-  const type = data.answers?.field?.choice;
-  return FIELD_TYPES.includes(type) ? type : null;
+  const answer = (await response.json()).answers?.field;
+  if (answer?.probabilities) return answer.probabilities;
+  return answer?.choice ? { [answer.choice]: 1 } : null;
 }
 
 function render(values, suggestions) {
@@ -90,11 +124,18 @@ function render(values, suggestions) {
     if (field.loop?.rows > 1) label.textContent += ` (${field.loop.index + 1}번째)`;
     if (field.part) label.textContent += ` (칸 ${field.part.count}개로 나뉨)`;
     const note = document.createElement("small");
-    const suggestion = suggestions.get(field.token);
-    note.textContent = [field.section, field.inputType, suggestion?.reason].filter(Boolean).join(" · ");
-    const candidates = values.filter(item => item.type === suggestion?.type);
-    const chosen = defaultChoice(field, suggestion?.type, candidates, lastEntries);
-    const select = valueSelect(values, chosen);
+    const suggestion = suggestions.get(field.token) || { candidates: [] };
+    const ranked = suggestion.candidates.slice(0, TOP_CANDIDATES)
+      .map(candidate => `${describeType(candidate.type)} ${Math.round(share(candidate, suggestion.candidates) * 100)}%`).join(", ");
+    note.textContent = [field.section, field.inputType, suggestion.reason, ranked && `후보: ${ranked}`].filter(Boolean).join(" · ");
+    // The best-ranked candidate that has a clear saved value starts selected.
+    const withLevel = { ...field, level: suggestion.level };
+    let chosen = "";
+    for (const candidate of suggestion.candidates) {
+      chosen = defaultChoice(withLevel, candidate.type, values.filter(item => item.type === candidate.type), lastEntries);
+      if (chosen) break;
+    }
+    const select = valueSelect(values, chosen, suggestion.candidates);
     wrapper.append(label, note, select);
     fieldsRoot.append(wrapper);
     choices.push({ token: field.token, select, wrapper });
@@ -102,16 +143,22 @@ function render(values, suggestions) {
   fillButton.disabled = stepButton.disabled = !fields.length || !values.length;
 }
 
-// Scan the page and suggest a profile item per field: a mapping confirmed on this site before, else the rules.
+// Scan the page and rank profile items per field: a mapping confirmed on this site before, else
+// the rules' weighted clues plus neighbouring fields (plan.refineRanks).
 async function analysePage(siteMappings) {
   const scanResult = await send("scan");
   fields = scanResult.fields;
   pageUrl = scanResult.url;
-  return new Map(fields.map(field => [field.token,
-    FIELD_TYPES.includes(siteMappings[fieldKey(field)])
-      ? { type: siteMappings[fieldKey(field)], reason: "이전에 확인한 매핑" }
-      : classify(field)
-  ]));
+  const own = new Map(fields.map(field => {
+    const mapped = siteMappings[fieldKey(field)];
+    return [field.token, FIELD_TYPES.includes(mapped) ? [{ type: mapped, score: 100, reasons: ["이전에 확인한 매핑"], mapped: true }] : rank(field)];
+  }));
+  const { ranks, levels } = refineRanks(fields, own);
+  return new Map(fields.map(field => {
+    const candidates = ranks.get(field.token) || [];
+    const reason = candidates[0] ? candidates[0].reasons.join(" + ") : classify(field).reason;
+    return [field.token, { type: candidates[0]?.type || null, reason, candidates, level: levels.get(field.token) ?? null }];
+  }));
 }
 
 function reportRows(entries) {
@@ -148,14 +195,22 @@ document.getElementById("scan").addEventListener("click", async () => {
       if (added) addedRows.push(`${PROFILE_SCHEMA.find(group => group.group === plan.group).label} ${added}줄`);
     }
     if (addedRows.length) suggestions = await analyse();
-    let modelCount = 0;
+    // Laya re-ranks every field's candidates with its probabilities (mappings confirmed on this
+    // site stay as they are). Fields are sent one at a time; only their descriptions leave the popup.
+    let layaCount = 0;
     let layaError = "";
     if (layaToggle.checked) {
-      setStatus(`입력칸 ${fields.length}개를 찾았습니다. 로컬 Laya가 모르는 칸을 분석 중입니다.`);
+      const asked = fields.map((field, index) => ({ field, index }))
+        .filter(({ field }) => !(field.part?.index > 0) && !suggestions.get(field.token)?.candidates[0]?.mapped);
       try {
-        for (const field of fields.filter(field => !suggestions.get(field.token).type)) {
-          const type = await layaClassify(field);
-          if (type) { suggestions.set(field.token, { type, reason: "Laya 제안 · 확인 필요" }); modelCount++; }
+        for (const { field, index } of asked) {
+          setStatus(`입력칸 ${fields.length}개 · 로컬 Laya로 순위를 매기는 중 (${layaCount + 1}/${asked.length})`);
+          const probabilities = await layaProbabilities(field, index);
+          const suggestion = suggestions.get(field.token);
+          const candidates = combineRanks(suggestion.candidates, probabilities, LAYA_WEIGHT);
+          suggestions.set(field.token, { ...suggestion, candidates, type: candidates[0]?.type || null,
+            reason: candidates[0] ? candidates[0].reasons.join(" + ") : "Laya: 이력 항목 아님" });
+          layaCount++;
         }
       } catch (error) {
         layaError = `Laya 연결 실패: ${error.message}`;
@@ -164,11 +219,13 @@ document.getElementById("scan").addEventListener("click", async () => {
     render(values, suggestions);
     currentRun = createRun(pageUrl, fields, suggestions);
     currentRun.version = chrome.runtime.getManifest().version;
+    if (layaCount) currentRun.notes.push(`Laya 순위 ${layaCount}칸 (가중치 ${LAYA_WEIGHT})`);
     if (layaError) currentRun.notes.push(layaError);
     await recordRun(currentRun);
-    if (layaError) { setStatus(`${layaError}. 규칙 결과를 표시합니다.`); return; }
+    if (layaError) { setStatus(`${layaError}. ${layaCount ? `${layaCount}칸까지만 Laya 순위를 반영했고 ` : ""}나머지는 규칙 순위를 표시합니다.`); return; }
     const rowsNote = addedRows.length ? ` · + 버튼으로 ${addedRows.join(", ")} 추가` : "";
-    setStatus(`입력칸 ${fields.length}개 · 저장된 값 ${values.length}개 · Laya 제안 ${modelCount}개${rowsNote}. 아래 매핑을 확인하세요.`);
+    const layaNote = layaCount ? ` · Laya 순위 ${layaCount}칸` : "";
+    setStatus(`입력칸 ${fields.length}개 · 저장된 값 ${values.length}개${layaNote}${rowsNote}. 칸마다 추천 순위를 확인하세요.`);
   } catch (error) { setStatus(error.message); }
 });
 

@@ -40,13 +40,13 @@ const RULES = [
   ["personal.email", /이메일|전자우편|e-?mail/i],
   ["personal.phone", /휴대.?전화|휴대폰|핸드폰|연락처|전화번호|mobile|cell.?phone/i],
   ["personal.birthDate", /생년월일|생일|birth/i],
-  ["personal.englishName", /영문.?(이름|성명)|english.?name|name.?eng/i],
+  ["personal.englishName", /영문.?(이름|성명)|english.?name|name.?en(g|glish)?\b|\ben(g|glish)?.?name/i],
   ["personal.chineseName", /한자.?(이름|성명)|한문.?(이름|성명)|chinese.?name/i],
   ["personal.gender", /성별|gender|\bsex\b/i],
   ["personal.nationality", /국적|nationality/i],
   ["personal.zipCode", /우편.?번호|zip.?code|post.?code|postal/i],
   ["personal.addressDetail", /상세.?주소|나머지.?주소|detail.?address|address.?detail/i],
-  ["military.discharge", /제대.?구분|전역.?구분|제대.?사유|제대.?유형/i],
+  ["military.discharge", /(제대|전역).?(구분|사유|유형)/i],
   ["military.rank", /계급/i],
   ["military.branch", /군별|군.?종류/i],
   ["military.startDate", /입대.?일|입영.?일/i],
@@ -79,12 +79,13 @@ const RULES = [
 // Career comes after award and activity because "수상경력" and "활동경력" also contain 경력.
 const SECTION_RULES = [
   [/병역|군\s?복무|military/i, [
+    ["military.discharge", /(제대|전역).?(구분|사유|유형)|discharge/i],
     ["military.startDate", /입대|입영|시작|start/i], ["military.endDate", /전역|제대.?일|종료|end/i],
     ["military.discharge", /제대|전역|discharge/i], ["military.rank", /계급|rank|position/i],
     ["military.branch", /군별|branch|kind/i], ["military.status", /구분|여부|type|status/i]]],
   [/어학|외국어|language/i, [
     // Score before date: "취득점수" is a score, not a 취득일.
-    ["language.number", /번호/], ["language.grade", /등급|레벨|level|grade/i], ["language.score", /점수|성적|급수|score/i],
+    ["language.number", /번호|number|\bno\b/i], ["language.grade", /등급|레벨|level|grade/i], ["language.score", /점수|성적|급수|score/i],
     ["language.obtainedDate", /취득|응시|일자|날짜|date/i], ["language.test", /시험|종류|어학|명/]]],
   [/수상|award/i, [
     ["award.date", /일자|날짜|수상.?일|연월/], ["award.issuer", /기관|수여|주최/], ["award.title", /수상|명|내역|제목/]]],
@@ -95,14 +96,16 @@ const SECTION_RULES = [
     ["activity.startDate", /시작/], ["activity.endDate", /종료/], ["activity.organization", /기관|단체|소속/],
     ["activity.description", /내용|설명|역할/], ["activity.name", /활동|명|이름|제목/]]],
   [/경력|재직|근무|career|employment/i, [
-    ["career.company", /회사|직장|근무처|기관/], ["career.department", /부서/], ["career.position", /직급|직위|직책|직무/],
-    ["career.startDate", /입사|시작/], ["career.endDate", /퇴사|종료/], ["career.description", /업무|내용|설명/]]],
+    ["career.company", /회사|직장|근무처|기관|company|\bcom\b/i], ["career.department", /부서|\bdep(t|artment)?\b/i],
+    ["career.position", /직급|직위|직책|직무|\bpos(ition)?\b/i],
+    ["career.startDate", /입사|시작|start|\bs ?date/i], ["career.endDate", /퇴사|종료|\bend|\be ?date/i],
+    ["career.description", /업무|내용|설명|\bwork\b|content|desc/i]]],
   [/자격|면허|certificate|license/i, [
-    ["certificate.obtainedDate", /취득|발급.?일/], ["certificate.issuer", /발급.?기관|시행.?기관/],
-    ["certificate.number", /등록.?번호|발급.?번호|번호/], ["certificate.name", /명칭|종목|이름|자격/]]],
+    ["certificate.obtainedDate", /취득|발급.?일|date/i], ["certificate.issuer", /발급.?기관|시행.?기관|\borg|issuer|agency|authority/i],
+    ["certificate.number", /등록.?번호|발급.?번호|번호|number|\bno\b/i], ["certificate.name", /명칭|종목|이름|자격/]]],
   [/학력|대학교|대학|school|education/i, [
-    ["education.startDate", /입학|시작.?일/], ["education.graduationDate", /졸업|종료.?일/],
-    ["education.school", /학교|기관.?명/], ["education.major", /전공|학과|학부/]]]
+    ["education.startDate", /입학|시작.?일|start/i], ["education.graduationDate", /졸업|종료.?일|\bend/i],
+    ["education.school", /학교|기관.?명/], ["education.major", /전공|학과|학부|major|\bdepart/i]]]
 ];
 
 // Used only when the page gives no section to go on.
@@ -114,8 +117,16 @@ const FALLBACK_RULES = [
 const OTHER_PERSON = /추천|가족|보호자|비상.?연락|recommend|referee|reference|family|guardian|parent|emergency/i;
 
 // "currentAddress.zipCode" -> "current Address zip Code", so word patterns can match it.
-function splitName(text) {
+export function splitName(text) {
   return String(text || "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[._\-[\]\d]+/g, " ").trim();
+}
+
+// Words split apart and also joined with the next one: "Ncs Career E Date" also reads as
+// "NcsCareer CareerE EDate", so "EDate" and "startdate" style names match either way.
+export function variants(text) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const joined = words.slice(1).map((word, index) => words[index] + word);
+  return [...words, ...joined].join(" ");
 }
 
 function matchSection(text, context) {
@@ -127,13 +138,64 @@ function matchSection(text, context) {
   return null;
 }
 
+// Every item a text points at, in rule order (the first is the rules' own pick).
+function allMatches(text, context) {
+  const found = [];
+  for (const [section, rules] of SECTION_RULES) {
+    if (section.test(context)) for (const [type, pattern] of rules) if (pattern.test(text)) found.push(type);
+  }
+  for (const [type, pattern] of [...RULES, ...FALLBACK_RULES]) if (pattern.test(text)) found.push(type);
+  return [...new Set(found)];
+}
+
+// A group's own rules, whatever the section: "Ftest1Hscore" in a row labelled "TOEIC" is its score.
+export function matchGroup(group, text) {
+  for (const [, rules] of SECTION_RULES) {
+    const match = rules.find(([type, pattern]) => type.startsWith(`${group}.`) && pattern.test(text));
+    if (match) return match[0];
+  }
+  return RULES.find(([type, pattern]) => type.startsWith(`${group}.`) && pattern.test(text))?.[0] || null;
+}
+
+// An internal name names an entry's title ("License", "HighschoolName") only when nothing else is
+// in it: "HighschoolLocation", "LicenseComplete" or "NcsJobSchool" are about something else.
+const TITLE_WORDS = {
+  "education.school": /school|college|university|univ|graduate|학교/i,
+  "certificate.name": /license|licence|certificate|자격증?|면허/i,
+  "career.company": /company|^com$|회사|직장/i,
+  "language.test": /test|exam|toeic|toefl|opic|teps|language|어학/i
+};
+export const DATED_GROUPS = ["military", "education", "career", "activity", "project"];
+// Labels that name only the group or the row, which the internal name may narrow down.
+const BROAD = new Set([...Object.keys(TITLE_WORDS), "personal.name", "personal.address",
+  ...DATED_GROUPS.map(group => `${group}.startDate`)]);
+// "StartType", "EndGubun": a kind of start or end (입학/편입, 졸업/수료), not a date.
+function kindNotDate(type, text) {
+  return /date/i.test(type) && /\b(type|gubun|kind|flag|code)\b/i.test(text);
+}
+export function onlyTitle(type, text) {
+  if (kindNotDate(type, text)) return false;
+  const words = TITLE_WORDS[type];
+  return !words || String(text).split(/\s+/).filter(Boolean).every(word => words.test(word) || /^(name|nm|title|명)$/i.test(word));
+}
+
+// "기간" in a section with start dates is its start; the popup turns the second of a pair into the end.
+const PERIOD = /기간|period/i;
+function periodType(context) {
+  for (const [section, rules] of SECTION_RULES) {
+    const group = rules[0][0].split(".")[0];
+    if (section.test(context) && DATED_GROUPS.includes(group)) return `${group}.startDate`;
+  }
+  return null;
+}
+
 // Placeholders that are sample values rather than descriptions ("abc@xxx.com", "010-1234-1234").
 const EXAMPLES = [
   ["personal.email", /^[\w.+-]+@[\w-]+(\.[\w-]+)+$/],
   ["personal.phone", /^0\d{1,2}[-. ]?\d{3,4}[-. ]?\d{4}$/]
 ];
 
-function infer(label, context, internal, leaf, placeholder) {
+function infer(label, context, internal, leaf, placeholder, textLike) {
   if (label) {
     for (const [type, pattern] of RULES) {
       if (pattern.test(label)) return { type, reason: "라벨 규칙" };
@@ -143,6 +205,8 @@ function infer(label, context, internal, leaf, placeholder) {
     for (const [fallback, pattern] of FALLBACK_RULES) {
       if (pattern.test(label)) return { type: fallback, reason: "라벨 규칙" };
     }
+    const period = PERIOD.test(label) && textLike && periodType(context);
+    if (period) return { type: period, reason: "기간 칸" };
   }
   const example = EXAMPLES.find(([, pattern]) => pattern.test(String(placeholder || "").trim()));
   if (example) return { type: example[0], reason: "입력 예시" };
@@ -150,32 +214,92 @@ function infer(label, context, internal, leaf, placeholder) {
   // ("basicInfoGroupAnswers.mobilePhone" → "mobile Phone"), then the whole name.
   for (const text of [leaf, internal].filter(Boolean)) {
     const type = matchSection(text, context);
-    if (type) return { type, reason: "필드 속성" };
+    if (type && onlyTitle(type, text)) return { type, reason: "필드 속성" };
     for (const [ruleType, pattern] of RULES) {
-      if (pattern.test(text)) return { type: ruleType, reason: "필드 속성" };
+      if (pattern.test(text) && onlyTitle(ruleType, text)) return { type: ruleType, reason: "필드 속성" };
     }
   }
   return null;
 }
 
-// Reference values the site asks for, not the applicant's own ("만점기준", perfectScore).
-const NOT_PROFILE = /만점|최고\s*점수|perfect\s*score|max\s*score/i;
+// Reference values the site asks for, not the applicant's own ("만점기준", perfectScore), minors and
+// double majors (not "전공"), and counts such as months worked.
+const NOT_PROFILE = /만점|최고\s*점수|perfect\s*score|max\s*score|minor|부전공|복수\s*전공|count|개월\s*수/i;
+// Statements to tick yourself ("…임을 확인함", "동의합니다") are the applicant's own decision.
+const STATEMENT = /확인함|확인합니다|동의|서약|확약|agree|consent/i;
 
-export function classify(field) {
-  // title is often the only thing telling apart two inputs under one row title ("복무기간": 시작일 / 종료일).
-  const label = [...new Set([field.label, field.placeholder, field.ariaLabel, field.title].filter(Boolean))].join(" ").trim();
+// How much each clue counts when candidates are ranked. The rules' own decision leads; the other
+// clues add the runners-up (and let Laya's probabilities, when used, reorder them).
+export const WEIGHTS = { decision: 10, label: 3, example: 3, leaf: 2, internal: 1, extra: 0.4 };
+
+function describe(field) {
+  // Required markers ("* 성명") and bullets ("ㅇ 본인은") are not part of the label.
+  const label = [...new Set([field.label, field.placeholder, field.ariaLabel, field.title].filter(Boolean)
+    .map(text => String(text).replace(/^[\s*※ㅇ•·-]+/, "")))].join(" ").trim();
   const internal = [splitName(field.name), splitName(field.id)].filter(Boolean).join(" ");
   const leaf = splitName(String(field.name || field.id || "").split(".").pop());
   const context = [field.section, field.name, field.id].filter(Boolean).join(" ");
-  if (!label && !context) return { type: null, reason: "필드 설명 없음" };
+  const textLike = ["text", "date", "month", "tel", "number", "", undefined].includes(field.inputType);
+  return { label, internal, leaf, context, textLike };
+}
 
-  if (NOT_PROFILE.test(`${label} ${internal}`)) return { type: null, reason: "기준값 칸" };
-  const result = infer(label, context, internal, leaf, field.placeholder);
+// Why a field takes no profile value at all, or null.
+function excluded(field, { label, internal }) {
+  if (NOT_PROFILE.test(`${label} ${internal}`)) return "기준값 칸";
+  if (field.inputType === "checkbox" && (STATEMENT.test(label) || label.length > 30)) return "확인·동의 항목(직접 체크)";
+  return null;
+}
+
+export function classify(field) {
+  const clues = describe(field);
+  const { label, internal, leaf, context, textLike } = clues;
+  if (!label && !context) return { type: null, reason: "필드 설명 없음" };
+  const skip = excluded(field, clues);
+  if (skip) return { type: null, reason: skip };
+  let result = infer(label, context, internal, leaf, field.placeholder, textLike);
   if (!result) return { type: null, reason: "확인 필요" };
+  // A shared row label says the group; the internal name can say which item of it
+  // ("* 현주소" + Zipcode2 → 우편번호, "TOEIC" + Ftest1Hscore → 점수, "* 성명" + Name_en_first → 영문 이름).
+  if (result.reason !== "필드 속성" && leaf && BROAD.has(result.type)) {
+    const byName = matchGroup(result.type.split(".")[0], variants(leaf));
+    if (byName && byName !== result.type && onlyTitle(byName, leaf)) result = { type: byName, reason: "라벨 + 필드 속성" };
+  }
   if (result.type.startsWith("personal.") && OTHER_PERSON.test(`${label} ${context}`)) {
     return { type: null, reason: "추천인·가족 등 다른 사람 칸" };
   }
   return result;
+}
+
+// Candidates for a field, best first: [{ type, score, reasons }]. Scores are weighted clue votes;
+// the first is classify's pick. Empty when the field takes no profile value.
+export function rank(field) {
+  const clues = describe(field);
+  const { label, internal, leaf, context } = clues;
+  if (!label && !context) return [];
+  // Marked, so neighbouring fields do not hand these a value either.
+  const skip = excluded(field, clues);
+  if (skip) return Object.assign([], { excluded: skip });
+  const votes = new Map();
+  const vote = (type, weight, reason) => {
+    const entry = votes.get(type) || { type, score: 0, reasons: [] };
+    entry.score += weight;
+    if (!entry.reasons.includes(reason)) entry.reasons.push(reason);
+    votes.set(type, entry);
+  };
+  const decision = classify(field);
+  if (decision.type) vote(decision.type, WEIGHTS.decision, decision.reason);
+  else if (/다른 사람/.test(decision.reason)) return Object.assign([], { excluded: decision.reason });
+  const cast = (text, weight, reason, titleCheck) => allMatches(text, context)
+    .filter(type => !titleCheck || onlyTitle(type, text))
+    .forEach((type, index) => vote(type, index ? WEIGHTS.extra * weight : weight, reason));
+  if (label) cast(label, WEIGHTS.label, "라벨");
+  const example = EXAMPLES.find(([, pattern]) => pattern.test(String(field.placeholder || "").trim()));
+  if (example) vote(example[0], WEIGHTS.example, "입력 예시");
+  if (leaf) cast(variants(leaf), WEIGHTS.leaf, "필드 이름", true);
+  if (internal && internal !== leaf) cast(variants(internal), WEIGHTS.internal, "필드 이름", true);
+  const other = OTHER_PERSON.test(`${label} ${context}`);
+  return [...votes.values()].filter(entry => !(other && entry.type.startsWith("personal.")))
+    .sort((a, b) => b.score - a.score);
 }
 
 export function valuesFor(profile, type) {

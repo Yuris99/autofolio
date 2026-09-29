@@ -53,4 +53,5 @@ test("profile page renders, adds, removes and saves entries", { skip }, () => ru
 test("recruiter.co.kr-shaped form is classified and filled end to end", { skip }, () => runFixture("recruiter-fixture.html"));
 test("a pick that opens a login window is handed to the user", { skip }, () => runFixture("login-fixture.html"));
 test("split boxes, example formats, step-by-step fill and undo", { skip }, () => runFixture("parts-fixture.html"));
+test("popup ranks candidates and preselects values, with and without Laya", { skip }, () => runFixture("popup-fixture.html"));
 test("newer forms: div labels, sample placeholders, one name per radio", { skip }, () => runFixture("v1-fixture.html"));

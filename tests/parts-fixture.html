@@ -27,6 +27,13 @@
   <tr><th>연락처</th><td><input name="tel" placeholder="예) 01012345678"></td></tr>
   <tr><th>영문 이름</th><td><input name="en" placeholder="HONG GILDONG"></td></tr>
 </table>
+<!-- incruit.com shape: parts told apart only by their names, no separators between them. -->
+<table>
+  <tr><th>* 성명</th><td><input name="Name"> <input name="Name_en_first"> <input name="Name_en_last"></td></tr>
+  <tr><th>* 생년월일</th><td><input name="BirthdateY"><input name="BirthdateM"><input name="BirthdateD"></td></tr>
+  <tr><th>기간</th><td><input name="cHstartdateY"><input name="cHstartdateM">
+    <select name="HighschoolStartType"><option value="">선택</option><option>입학</option><option>편입</option></select></td></tr>
+</table>
 <script src="../extension/page-bridge.js"></script>
 <script src="../extension/option-match.js"></script>
 <script src="../extension/value-format.js"></script>
@@ -45,6 +52,18 @@
   checks.birthSplit = by("year").part?.count === 3 && by("year").label === "생년월일";
   checks.addressNotSplit = !by("addr1").part;
   checks.rangeNotSplit = !by("from").part;
+  checks.namedParts = !by("Name").part && by("Name_en_first").part?.count === 2 && by("BirthdateY").part?.count === 3 &&
+    by("cHstartdateY").part?.count === 2 && !by("HighschoolStartType").part;
+  const named = await send({ action: "fill", items: [
+    { token: by("Name_en_first").token, value: "HONG GIL DONG" },
+    { token: by("BirthdateY").token, value: "1999.03.02" },
+    { token: by("cHstartdateY").token, value: "2014-03" }
+  ] });
+  checks.namedFilled = named.results.every(result => result.status === "filled") &&
+    $("Name_en_last").value === "HONG" && $("Name_en_first").value === "GIL DONG" &&
+    $("BirthdateY").value === "1999" && $("BirthdateM").value === "03" && $("BirthdateD").value === "02" &&
+    $("cHstartdateY").value === "2014" && $("cHstartdateM").value === "03" && $("HighschoolStartType").value === "";
+  document.querySelector("[data-autofolio-notice]")?.remove();
 
   // Fill everything at once.
   const items = [

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultChoice, fieldId, followUpItems, rowsToAdd } from "../extension/plan.js";
+import { combineRanks, defaultChoice, fieldId, followUpItems, rowsToAdd } from "../extension/plan.js";
 
 const loop = (key, index, rows, canAdd = true) => ({ key, index, rows, canAdd });
 const types = { a: "certificate.name", b: "language.test", c: "personal.name", d: null };
@@ -50,4 +50,18 @@ test("follow-up fills only newly opened fields that have a clear value", () => {
   ];
   const items = followUpItems(seen, fields, field => types[field.token], values);
   assert.deepEqual(items.map(item => [item.token, item.value]), [["af-2", "한국산업인력공단"], ["af-3", "한국데이터산업진흥원"]]);
+});
+
+test("Laya's probabilities re-rank the rules' candidates by weight", () => {
+  const rules = [{ type: "education.school", score: 10, reasons: ["라벨"] }, { type: "education.major", score: 3, reasons: ["필드 이름"] }];
+  assert.equal(combineRanks(rules, null), rules);
+  // Rules alone favour the school (77%), but Laya is sure it is the major.
+  const ranked = combineRanks(rules, { "education.major": 0.95, "education.school": 0.03, unknown: 0.02 });
+  assert.deepEqual(ranked.map(entry => entry.type), ["education.major", "education.school"]);
+  assert.ok(ranked[0].reasons.includes("Laya 95%"));
+  // Laya can add a candidate the rules missed, but not "unknown" or near-zero ones.
+  const added = combineRanks([], { "certificate.number": 0.6, "language.number": 0.38, "personal.name": 0.01, unknown: 0.01 });
+  assert.deepEqual(added.map(entry => entry.type), ["certificate.number", "language.number"]);
+  // With weight 0 Laya changes nothing.
+  assert.deepEqual(combineRanks(rules, { "education.major": 1 }, 0).map(entry => entry.type), ["education.school", "education.major"]);
 });

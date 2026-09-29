@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>AutoFolio 팝업 추천 순위 검증</title>
+<!-- Runs popup.js against stand-ins for the chrome APIs, a tab that returns incruit.com-shaped
+     fields (log of 2026-09-29) and a fake Laya server. Checks the ranked, preselected values. -->
+<script>
+  const fields = [
+    ["* 성명", "Name"], ["* 성명", "Name_en_first", "text", { index: 0, count: 2 }], ["* 성명", "Name_en_last", "text", { index: 1, count: 2 }],
+    ["* 현주소", "Zipcode2"], ["* 현주소", "Address21"], ["* 현주소", "Address22"],
+    ["학교명", "HighschoolName"], ["소재지", "HighschoolLocation", "select"],
+    ["기간", "cHstartdateY", "text", { index: 0, count: 2 }], ["기간", "cHstartdateM", "text", { index: 1, count: 2 }],
+    ["학교명", "UniversityName"], ["학교명", "UniversityDepart", "select"], ["전공", "UniversityMajor"],
+    ["기간", "UstartdateY", "text", { index: 0, count: 2 }], ["기간", "UstartdateM", "text", { index: 1, count: 2 }],
+    ["", "License"], ["", "LicenseNumber"], ["", "LicenseComplete", "select"],
+    ["ㅇ 본인은 병역의무를 필한자 또는 면제된 자임을 확인함", "subcheck_box2", "checkbox"]
+  ].map(([label, name, inputType = "text", part = null], index) => ({
+    token: `af-${index + 1}`, label, name, inputType, part, section: "금융보안원 입사지원서", placeholder: "", title: "", ariaLabel: "", id: "", options: [], loop: null
+  }));
+  const store = {
+    profile: {
+      personal: { name: "홍길동", englishName: "HONG GILDONG", zipCode: "06236", address: "서울특별시 강남구 테헤란로 1", addressDetail: "1층" },
+      education: [{ school: "예시고등학교", startDate: "2014.03" }, { school: "예시대학교", major: "컴퓨터공학", startDate: "2017.03" }],
+      certificate: [{ name: "정보처리기사", number: "23201012345A" }]
+    }
+  };
+  const layaCalls = [];
+  window.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    layaCalls.push(body.state.name);
+    // Laya is sure UniversityDepart is the school list, against the rules' "major".
+    const probabilities = body.state.name === "UniversityDepart" ? { "education.school": 0.99, unknown: 0.01 } : { unknown: 1 };
+    return { ok: true, json: async () => ({ answers: { field: { type: "choice", choice: Object.keys(probabilities)[0], probabilities } } }) };
+  };
+  window.chrome = {
+    tabs: {
+      async query() { return [{ id: 1, url: "https://fsec.incruit.com/apply/form_apply.asp?x=1" }]; },
+      async sendMessage(tabId, message) {
+        if (message.action === "scan") return { fields: structuredClone(fields), url: "https://fsec.incruit.com/apply/form_apply.asp" };
+        return {};
+      }
+    },
+    scripting: { async executeScript() {} },
+    storage: {
+      local: {
+        async get(keys) { return Object.fromEntries([].concat(keys).map(key => [key, structuredClone(store[key])]).filter(([, value]) => value !== undefined)); },
+        async set(values) { Object.assign(store, structuredClone(values)); }
+      },
+      session: { async get() { return {}; }, async set() {} }
+    },
+    runtime: { getManifest: () => ({ version: "test" }), onMessage: { addListener() {} }, openOptionsPage() {} }
+  };
+</script>
+<body class="popup">
+  <h1>AutoFolio <small id="version"></small></h1><button id="profile">내 이력 편집</button>
+  <label class="toggle"><input id="useLaya" type="checkbox"> Laya</label>
+  <div class="actions"><button id="scan">현재 페이지 분석</button><button id="fill" disabled>모두 채우기</button><button id="step" disabled>하나씩 채우기</button><button id="undo" disabled>되돌리기</button></div>
+  <div id="stepPanel" hidden><div id="stepText"></div><div class="step-buttons"></div><small id="stepNote"></small></div>
+  <p id="status"></p>
+  <div id="fields"></div>
+  <div id="report"></div>
+  <footer><span id="logSummary"></span><button id="exportLog">기록</button><button id="clearLog">지우기</button></footer>
+<script type="module">
+  await import("../extension/popup.js");
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const status = document.getElementById("status");
+  async function analyse() {
+    status.textContent = "";
+    document.getElementById("scan").click();
+    for (let i = 0; i < 100 && !/칸마다|실패|Error/.test(status.textContent); i++) await wait(50);
+  }
+  // Rows are the fields in order, without the later boxes of a split value.
+  const shown = fields.filter(field => !(field.part?.index > 0));
+  const value = name => document.querySelectorAll("#fields select")[shown.findIndex(field => field.name === name)].value;
+  const checks = {};
+
+  await analyse();
+  checks.analysed = /칸마다/.test(status.textContent);
+  checks.englishName = value("Name_en_first") === "personal.englishName:0";
+  checks.name = value("Name") === "personal.name:0";
+  checks.zip = value("Zipcode2") === "personal.zipCode:0";
+  checks.address = value("Address21") === "personal.address:0";
+  checks.addressDetail = value("Address22") === "personal.addressDetail:0";
+  checks.highSchool = value("HighschoolName") === "education.school:0";
+  checks.highSchoolDate = value("cHstartdateY") === "education.startDate:0";
+  checks.university = value("UniversityName") === "education.school:1";
+  checks.universityDate = value("UstartdateY") === "education.startDate:1";
+  checks.major = value("UniversityMajor") === "education.major:1";
+  checks.locationEmpty = value("HighschoolLocation") === "";
+  checks.certificate = value("License") === "certificate.name:0" && value("LicenseNumber") === "certificate.number:0";
+  checks.completeEmpty = value("LicenseComplete") === "";
+  checks.statementEmpty = value("subcheck_box2") === "";
+  checks.rulesPickMajorForDepart = value("UniversityDepart") === "education.major:1";
+  const zipSelect = document.querySelectorAll("#fields select")[shown.findIndex(field => field.name === "Zipcode2")];
+  checks.recommendedGroup = zipSelect.querySelector("optgroup")?.label === "추천 순위" && /%/.test(zipSelect.querySelector("optgroup option").textContent);
+  checks.noLayaCalls = layaCalls.length === 0;
+  const run = store.runLog.at(-1);
+  checks.logHasCandidates = run.fields.find(field => field.name === "Zipcode2").candidates[0].type === "personal.zipCode";
+
+  // With Laya on, its probabilities re-rank: UniversityDepart becomes the school.
+  document.getElementById("useLaya").checked = true;
+  await analyse();
+  checks.layaAsked = layaCalls.length === shown.length;
+  checks.layaReranks = value("UniversityDepart") === "education.school:1";
+  checks.layaKeepsOthers = value("Zipcode2") === "personal.zipCode:0";
+
+  const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
+  document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
+  document.body.dataset.testDetails = JSON.stringify({ failed, status: status.textContent, layaCalls: layaCalls.length,
+    values: shown.map(field => [field.name, value(field.name)]) });
+</script>
+</body>
+</html>
