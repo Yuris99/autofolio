@@ -6,6 +6,8 @@ const fieldsRoot = document.getElementById("fields");
 const status = document.getElementById("status");
 const report = document.getElementById("report");
 const fillButton = document.getElementById("fill");
+const stepButton = document.getElementById("step");
+const undoButton = document.getElementById("undo");
 const layaToggle = document.getElementById("useLaya");
 let tabId;
 let fields = [];
@@ -79,11 +81,14 @@ function render(values, suggestions) {
   fieldsRoot.replaceChildren();
   choices = [];
   for (const field of fields) {
+    // Boxes after the first of a split value (010 | 1234 | 5678) are filled with the first.
+    if (field.part?.index > 0) continue;
     const wrapper = document.createElement("div");
     wrapper.className = "field";
     const label = document.createElement("label");
     label.textContent = field.label || field.ariaLabel || field.placeholder || field.name || "설명 없는 입력칸";
     if (field.loop?.rows > 1) label.textContent += ` (${field.loop.index + 1}번째)`;
+    if (field.part) label.textContent += ` (칸 ${field.part.count}개로 나뉨)`;
     const note = document.createElement("small");
     const suggestion = suggestions.get(field.token);
     note.textContent = [field.section, field.inputType, suggestion?.reason].filter(Boolean).join(" · ");
@@ -94,7 +99,7 @@ function render(values, suggestions) {
     fieldsRoot.append(wrapper);
     choices.push({ token: field.token, select });
   }
-  fillButton.disabled = !fields.length || !values.length;
+  fillButton.disabled = stepButton.disabled = !fields.length || !values.length;
 }
 
 // Scan the page and suggest a profile item per field: a mapping confirmed on this site before, else the rules.
@@ -130,7 +135,7 @@ document.getElementById("scan").addEventListener("click", async () => {
     tabId = tab.id;
     // The bridge presses Enter in search boxes from the page's own world; see page-bridge.js.
     await chrome.scripting.executeScript({ target: { tabId }, files: ["page-bridge.js"], world: "MAIN" }).catch(() => {});
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["option-match.js", "content.js"] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["option-match.js", "value-format.js", "content.js"] });
     ({ lastEntries = {} } = await sessionStore.get("lastEntries"));
     const { profile = {}, siteMappings = {} } = await chrome.storage.local.get(["profile", "siteMappings"]);
     const values = allValues(profile);
@@ -167,11 +172,33 @@ document.getElementById("scan").addEventListener("click", async () => {
   } catch (error) { setStatus(error.message); }
 });
 
-fillButton.addEventListener("click", async () => {
+async function chosenItems() {
   const { profile = {} } = await chrome.storage.local.get("profile");
   const values = new Map(allValues(profile).map(item => [item.key, item.value]));
-  const items = choices.filter(choice => choice.select.value && values.has(choice.select.value))
-    .map(choice => ({ token: choice.token, value: values.get(choice.select.value) }));
+  const labelOf = token => { const field = fields.find(field => field.token === token); return field?.label || field?.name || "입력칸"; };
+  return { profile, items: choices.filter(choice => choice.select.value && values.has(choice.select.value))
+    .map(choice => ({ token: choice.token, value: values.get(choice.select.value), label: labelOf(choice.token) })) };
+}
+
+// Like an editor's "replace one by one": a bar on the page walks through the chosen fields.
+stepButton.addEventListener("click", async () => {
+  const { items } = await chosenItems();
+  if (!items.length) { setStatus("채울 항목을 먼저 선택하세요."); return; }
+  await send("step", { items });
+  undoButton.disabled = false;
+  setStatus(`지원서 페이지 오른쪽 아래 바에서 ${items.length}칸을 하나씩 채우세요. 채우기·건너뛰기·이전·되돌리기를 쓸 수 있습니다.`);
+});
+
+undoButton.addEventListener("click", async () => {
+  try {
+    const { undone, left } = await send("undo");
+    setStatus(undone ? `되돌림: ${undone.label} (${undone.changed}곳)${left ? ` · 더 되돌릴 입력 ${left}건` : ""}` : "되돌릴 입력이 없습니다.");
+    undoButton.disabled = !left;
+  } catch (error) { setStatus(`되돌리기 실패: ${error.message}`); }
+});
+
+fillButton.addEventListener("click", async () => {
+  const { profile, items } = await chosenItems();
   if (!items.length) { setStatus("채울 항목을 먼저 선택하세요."); return; }
   fillButton.disabled = true;
   try {
@@ -185,6 +212,7 @@ fillButton.addEventListener("click", async () => {
     await chrome.storage.local.set({ siteMappings });
     const labelOf = token => { const field = fields.find(field => field.token === token); return field?.label || field?.name || token; };
     let { results, invalidFields = [], newFields = 0 } = await send("fill", { items });
+    undoButton.disabled = false;
     const entries = results.map(result => ({ label: labelOf(result.token), result }));
     if (currentRun) {
       const chosen = new Map(choices.filter(choice => choice.select.value)

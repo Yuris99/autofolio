@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>AutoFolio 나뉜 칸·예시 형식·하나씩 채우기·되돌리기 검증</title>
+<script>
+  let listener;
+  window.chrome = { runtime: { onMessage: { addListener(callback) { listener = callback; }, removeListener() {} } } };
+</script>
+<table>
+  <tr><th>휴대폰</th><td>
+    <select name="hp1"><option value="">선택</option><option>010</option><option>011</option></select> -
+    <input name="hp2" maxlength="4"> - <input name="hp3" maxlength="4">
+  </td></tr>
+  <tr><th>이메일</th><td>
+    <input name="email1"> @ <input name="email2">
+    <select name="email3"><option value="">선택</option><option value="naver.com">naver.com</option><option value="self">직접입력</option></select>
+  </td></tr>
+  <tr><th>생년월일</th><td>
+    <select name="year"><option value="">년도</option><option>1998</option><option>1999</option></select> 년
+    <select name="month"><option value="">월</option><option value="1">1</option><option value="3">3</option></select> 월
+    <select name="day"><option value="">일</option><option value="2">2</option></select> 일
+  </td></tr>
+  <tr><th>주소</th><td><input name="addr1"> <input name="addr2" placeholder="상세주소"></td></tr>
+  <tr><th>복무기간</th><td><input name="from" placeholder="YYYY.MM.DD"> ~ <input name="to" placeholder="YYYY.MM.DD"></td></tr>
+  <tr><th>연락처</th><td><input name="tel" placeholder="예) 01012345678"></td></tr>
+  <tr><th>영문 이름</th><td><input name="en" placeholder="HONG GILDONG"></td></tr>
+</table>
+<script src="../extension/page-bridge.js"></script>
+<script src="../extension/option-match.js"></script>
+<script src="../extension/value-format.js"></script>
+<script src="../extension/content.js"></script>
+<script type="module">
+  const send = message => new Promise(resolve => listener(message, null, resolve));
+  const $ = name => document.querySelector(`[name="${name}"]`);
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const { fields } = await send({ action: "scan" });
+  const by = name => fields.find(field => field.name === name);
+  const click = text => [...document.querySelectorAll("[data-autofolio-bar] button")].find(button => button.textContent === text).click();
+
+  const checks = {};
+  checks.phoneSplit = by("hp1").part?.count === 3 && by("hp3").part?.index === 2;
+  checks.emailSplit = by("email1").part?.count === 3;
+  checks.birthSplit = by("year").part?.count === 3 && by("year").label === "생년월일";
+  checks.addressNotSplit = !by("addr1").part;
+  checks.rangeNotSplit = !by("from").part;
+
+  // Fill everything at once.
+  const items = [
+    { token: by("hp1").token, value: "010-1234-5678" },
+    { token: by("email1").token, value: "me@example.com" },
+    { token: by("year").token, value: "1999-03-02" },
+    { token: by("from").token, value: "2019-01-07" },
+    { token: by("tel").token, value: "010-1234-5678" },
+    { token: by("en").token, value: "Hong Gildong" }
+  ];
+  const { results } = await send({ action: "fill", items });
+  checks.allFilled = results.every(result => result.status === "filled");
+  checks.phoneParts = $("hp1").value === "010" && $("hp2").value === "1234" && $("hp3").value === "5678";
+  checks.emailParts = $("email1").value === "me" && $("email2").value === "example.com" && $("email3").value === "self";
+  checks.birthParts = $("year").value === "1999" && $("month").value === "3" && $("day").value === "2";
+  checks.dateFormat = $("from").value === "2019.01.07";
+  checks.phoneExample = $("tel").value === "01012345678";
+  checks.nameExample = $("en").value === "HONG GILDONG";
+
+  // Undo the whole fill from the page notice.
+  [...document.querySelectorAll("[data-autofolio-notice] button")].find(button => button.textContent === "되돌리기").click();
+  await wait(50);
+  checks.undoAll = ["hp1", "hp2", "email1", "email3", "year", "from", "tel", "en"].every(name => $(name).value === "");
+
+  // One by one: fill, skip, fill, then undo the last and fill it again.
+  await send({ action: "step", items: items.slice(0, 3).map(item => ({ ...item, label: "칸" })) });
+  checks.barShown = /1 \/ 3/.test(document.querySelector("[data-autofolio-bar]").textContent) && $("hp1").style.outline.includes("solid");
+  click("채우기");
+  await wait(100);
+  click("건너뛰기 ▶");
+  click("채우기");
+  await wait(100);
+  checks.stepFilled = $("hp2").value === "1234" && $("email1").value === "" && $("year").value === "1999";
+  click("되돌리기");
+  await wait(50);
+  checks.stepUndo = $("year").value === "" && $("hp2").value === "1234" && /3 \/ 3/.test(document.querySelector("[data-autofolio-bar]").textContent);
+  click("◀ 이전");
+  click("남은 칸 모두 채우기");
+  await wait(100);
+  checks.stepRest = $("email2").value === "example.com" && $("year").value === "1999" && /끝/.test(document.querySelector("[data-autofolio-bar]").textContent);
+  click("닫기");
+  checks.barClosed = !document.querySelector("[data-autofolio-bar]") && !$("hp1").style.outline;
+
+  const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
+  document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
+  document.body.dataset.testDetails = JSON.stringify({ failed, results, parts: fields.map(field => [field.name, field.label, field.part]) });
+</script>
+</html>

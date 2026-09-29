@@ -230,14 +230,56 @@
     return count;
   }
 
+  // Boxes that together hold one value: 010 - 1234 - 5678, id @ domain [domain list], 1999 년 03 월.
+  // Consecutive boxes in one cell, with only a separator (or nothing) between them, where either a
+  // separator is shown or every box is too short for a whole value. "~" (a range) never joins.
+  let partOf = new Map();
+  const PART_TEXT = /^[\s\-–@.\/()년월일]*$/;
+  function partKind(element) {
+    if (element instanceof HTMLSelectElement) return "select";
+    return element instanceof HTMLInputElement && ["text", "tel", "email", "number"].includes(element.type) && !isSearchInput(element) ? "text" : null;
+  }
+  function betweenText(a, b) {
+    const range = document.createRange();
+    range.setStartAfter(a);
+    range.setEndBefore(b);
+    return range.toString().replace(/\s+/g, " ").trim();
+  }
+  function joins(a, b) {
+    if (!partKind(a) || !partKind(b)) return false;
+    const box = a.closest("td, dd, li, .input-group, .form-group, .field") || a.parentElement?.parentElement;
+    if (!box?.contains(b)) return false;
+    const own = element => [...(element.labels || [])].map(textOf).join(" ").replace(/[\s년월일]/g, "");
+    if (own(b) && own(b) !== own(a)) return false;
+    const between = betweenText(a, b);
+    return between.length <= 3 && PART_TEXT.test(between);
+  }
+  function findParts(list) {
+    const groups = new Map();
+    let run = [];
+    const flush = () => {
+      const separated = run.slice(1).some((element, i) => betweenText(run[i], element));
+      const short = run.every(element => element instanceof HTMLSelectElement || (element.maxLength > 0 && element.maxLength <= 4));
+      if (run.length >= 2 && run.length <= 4 && (separated || short)) run.forEach((element, index) => groups.set(element, { members: run, index }));
+      run = [];
+    };
+    for (const element of list) {
+      if (!run.length || joins(run.at(-1), element)) run.push(element);
+      else { flush(); run.push(element); }
+    }
+    flush();
+    return groups;
+  }
+
   function scan() {
     elements = new Map();
     const fields = [];
-    const candidates = document.querySelectorAll("input, textarea, select, [contenteditable='true']");
+    const candidates = [...document.querySelectorAll("input, textarea, select, [contenteditable='true']")].filter(isField);
+    partOf = findParts(candidates.filter(element => element.type !== "radio" && element.type !== "checkbox"));
     const seenRadios = new Set();
     let index = 0;
     for (const element of candidates) {
-      if (seenRadios.has(element) || !isField(element)) continue;
+      if (seenRadios.has(element)) continue;
       const inputType = element instanceof HTMLInputElement ? element.type : element.localName;
       const radios = inputType === "radio" ? radioGroup(element) : null;
       radios?.forEach(radio => seenRadios.add(radio));
@@ -247,9 +289,14 @@
       let options = [];
       if (element instanceof HTMLSelectElement) options = [...element.options].map(o => ({ value: o.value, text: o.text.trim() }));
       if (radios) options = radios.map(radio => ({ value: radio.value, text: choiceText(radio) }));
+      const part = partOf.get(element);
+      let label = radios ? groupLabel(element) : labelFor(element);
+      // A box labelled only by its unit ("년") is named by its row.
+      if (part && label.replace(/[\s년월일@\-]/g, "").length === 0) label = rowTitle(part.members[0]) || label;
       fields.push({
         token,
-        label: radios ? groupLabel(element) : labelFor(element),
+        label,
+        part: part ? { index: part.index, count: part.members.length } : null,
         ariaLabel: element.getAttribute("aria-label") || "",
         placeholder: element.getAttribute("placeholder") || "",
         title: element.getAttribute("title") || "",
@@ -596,30 +643,249 @@
     return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 선택했지만 화면에서 확인되지 않습니다${loginNote}. 확인하세요.` };
   }
 
+  // Help text next to a box often carries the example ("예) 010-1234-5678").
+  function helpText(element) {
+    const described = (element.getAttribute("aria-describedby") || "").split(/\s+/)
+      .map(id => id && document.getElementById(id)?.textContent).filter(Boolean);
+    const next = element.nextElementSibling;
+    const beside = next && !next.matches("input, select, textarea, button") && next.textContent.trim().length <= 40 ? [next.textContent] : [];
+    return [...described, ...beside].join(" ");
+  }
+
   function formattedValue(element, value) {
     if (!(element instanceof HTMLInputElement)) return value;
-    const digits = value.replace(/\D/g, "");
-    if (element.type === "date" && digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
-    if (element.type === "month" && digits.length >= 6) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}`;
-    // Text date boxes: follow the format the page hints at (placeholder "YYYY.MM.DD", a date
-    // already in the box, recruiter.co.kr's data-dates="birthday:YMD", maxlength 8, ...).
-    const looksLikeDate = /^\d{4}\D?\d{2}(\D?\d{2})?\D?$/.test(value.trim());
-    if (element.type === "text" && looksLikeDate) {
-      const current = element.value.trim().match(/^\d{4}(\D)\d{2}(?:(\D)\d{2})?$/);
-      const dates = (element.dataset.dates || "").match(/:(YMD|YM)\b/);
-      const hint = [element.placeholder, element.title, element.dataset.format || "",
-        current ? `yyyy${current[1]}mm${current[2] ? `${current[2]}dd` : ""}` : "",
-        dates ? (dates[1] === "YMD" ? "yyyy.mm.dd" : "yyyy.mm") : ""].join(" ");
-      const format = hint.match(/y{4}(\W?)m{2}(?:(\W?)d{2})?/i);
-      if (format) {
-        const [, first, second = ""] = format;
-        return format[0].toLowerCase().includes("dd") && digits.length === 8
-          ? `${digits.slice(0, 4)}${first}${digits.slice(4, 6)}${second}${digits.slice(6, 8)}`
-          : `${digits.slice(0, 4)}${first}${digits.slice(4, 6)}`;
-      }
-      if (element.maxLength === digits.length) return digits;
+    const dates = (element.dataset.dates || "").match(/:(YMD|YM)\b/);
+    const text = [element.placeholder, element.title, element.dataset.format || "", helpText(element),
+      dates ? (dates[1] === "YMD" ? "yyyy.mm.dd" : "yyyy.mm") : ""].join(" ");
+    return globalThis.AutoFolioFormat.formatValue(value, { type: element.type, text, current: element.value, maxLength: element.maxLength });
+  }
+
+  function setSelect(select, value) {
+    select.value = value;
+    select.dispatchEvent(new Event("input", { bubbles: true }));
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // One piece in a split box. Lists match "3" to "03", and a domain not listed picks "직접입력".
+  function setPart(element, piece) {
+    if (!(element instanceof HTMLSelectElement)) {
+      setNativeValue(element, piece);
+      return read(element) === piece;
     }
-    return value;
+    const options = [...element.options].filter(option => option.value !== "");
+    const numeric = /^\d+$/.test(piece);
+    const same = option => [option.value, option.text.trim()].some(text =>
+      text === piece || (numeric && /^\d+$/.test(text) && Number(text) === Number(piece)) ||
+      globalThis.AutoFolioMatch.normalize(text) === globalThis.AutoFolioMatch.normalize(piece));
+    const match = options.find(same) || options.find(option => /직접\s*입력|direct/i.test(option.text));
+    if (!match) return false;
+    setSelect(element, match.value);
+    return element.value === match.value;
+  }
+
+  async function fillParts(item, members, value) {
+    const pieces = globalThis.AutoFolioFormat.splitValue(value, members.map(element => ({ kind: partKind(element), maxLength: element.maxLength })));
+    if (!pieces) return { token: item.token, status: "review", detail: `칸 ${members.length}개로 나뉜 항목인데 값을 나누는 방법을 모르겠습니다. 직접 입력하세요.` };
+    const failed = members.filter((element, index) => !setPart(element, pieces[index]));
+    if (failed.length) return { token: item.token, status: "review", detail: `칸 ${members.length}개로 나눠 넣었지만 ${failed.length}개가 들어가지 않았습니다(목록에 없는 값). 확인하세요.` };
+    return { token: item.token, status: "filled", detail: `칸 ${members.length}개에 나눠 입력` };
+  }
+
+  // Undo: what a fill may change, recorded before it runs. A search pick also changes hidden inputs,
+  // the shown name and the detail fields it unlocks in its row.
+  const fillHistory = [];
+  function touched(element) {
+    if (element.type === "radio") return radioGroup(element);
+    const part = partOf.get(element);
+    if (part) return part.members;
+    if (!isSearchInput(element)) return [element];
+    const row = loopRow(element) || element.closest(".row, li, tr, .field, .form-group") || element.parentElement;
+    return [...row.querySelectorAll("input, select, textarea"), ...linkedFields(row),
+      ...[...row.querySelectorAll("span, strong, em, p, div")].filter(node => !node.children.length)];
+  }
+  function snapshot(nodes) {
+    return [...new Set(nodes)].map(node => ({ node, value: node.value, checked: node.checked, disabled: node.disabled,
+      text: node.matches("input, select, textarea") ? undefined : node.textContent }));
+  }
+  function restore(snaps) {
+    let changed = 0;
+    for (const { node, value, checked, disabled, text } of [...snaps].reverse()) {
+      if (!node.isConnected) continue;
+      if (text !== undefined) {
+        if (node.textContent !== text) { node.textContent = text; changed++; }
+        continue;
+      }
+      if (node.disabled !== disabled) node.disabled = disabled;
+      if (node.type === "radio" || node.type === "checkbox") {
+        if (node.checked === checked) continue;
+        node.checked = checked;
+        node.dispatchEvent(new Event("change", { bubbles: true }));
+      } else if (node.value !== value) {
+        if (node instanceof HTMLSelectElement) setSelect(node, value);
+        else if (node.isContentEditable) node.textContent = value;
+        else setNativeValue(node, value);
+      } else continue;
+      changed++;
+    }
+    return changed;
+  }
+  function undoLast() {
+    const entry = fillHistory.pop();
+    if (!entry) return null;
+    const changed = restore(entry.snaps);
+    log(`되돌리기: ${entry.label} (${changed}곳)`);
+    return { ...entry, changed };
+  }
+
+  // Fill one item and record how to undo it.
+  async function fillRecorded(item, snaps) {
+    const element = elements.get(item.token);
+    if (element?.isConnected) snaps.push(...snapshot(touched(element)));
+    const result = await fillOne(item);
+    log(`${result.status.padEnd(7)} ${item.token} ${element ? labelFor(element) || element.name : ""} — ${result.detail}`);
+    return result;
+  }
+
+  function undoNotice(text) {
+    if (!fillHistory.length) {
+      const notice = showNotice(text, [["close", "닫기"]]);
+      notice.choice.then(notice.close);
+      return;
+    }
+    const notice = showNotice(`${text} 되돌릴 수 있는 입력 ${fillHistory.length}건.`, [["undo", "되돌리기"], ["close", "닫기"]]);
+    notice.choice.then(answer => {
+      notice.close();
+      if (answer !== "undo") return;
+      const undone = undoLast();
+      undoNotice(`"${undone.label}"을 되돌렸습니다(${undone.changed}곳). 사이트가 서버에 보낸 내용(시험 성적 조회 등)은 되돌리지 못할 수 있습니다.`);
+    });
+  }
+
+  // Step through fields one at a time, like an editor's find-and-replace: fill, skip, go back,
+  // fill the rest, undo. Lives on the page because the extension popup closes on any page click.
+  let stepBar = null;
+  function outline(element, on) {
+    const target = visible(element) ? element : element.closest("label") || element.parentElement;
+    if (!target) return;
+    if (on) {
+      target.dataset.autofolioOutline = target.style.outline;
+      target.style.outline = "3px solid #3b82f6";
+      target.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    } else if ("autofolioOutline" in target.dataset) {
+      target.style.outline = target.dataset.autofolioOutline;
+      delete target.dataset.autofolioOutline;
+    }
+  }
+  function preview(item) {
+    const element = elements.get(item.token);
+    const part = element && partOf.get(element);
+    if (part) {
+      const pieces = globalThis.AutoFolioFormat.splitValue(item.value, part.members.map(member => ({ kind: partKind(member), maxLength: member.maxLength })));
+      return pieces ? pieces.join(" | ") : item.value;
+    }
+    return element && !isSearchInput(element) ? formattedValue(element, String(item.value)) : String(item.value);
+  }
+
+  function startSteps(items) {
+    stepBar?.close();
+    let cursor = 0;
+    let busy = false;
+    let note = "";
+    const done = new Map();
+    const box = document.createElement("div");
+    box.dataset.autofolioBar = "";
+    Object.assign(box.style, {
+      position: "fixed", right: "16px", bottom: "16px", zIndex: "2147483647", width: "min(380px, calc(100vw - 32px))",
+      padding: "12px 14px", borderRadius: "10px", background: "#1f2937", color: "#fff",
+      font: "13px/1.5 system-ui, sans-serif", boxShadow: "0 6px 24px rgba(0,0,0,.3)"
+    });
+    const head = document.createElement("div");
+    const body = document.createElement("div");
+    const status = document.createElement("div");
+    Object.assign(head.style, { fontWeight: "600", marginBottom: "6px" });
+    Object.assign(body.style, { wordBreak: "break-all" });
+    Object.assign(status.style, { marginTop: "6px", color: "#cbd5e1", fontSize: "12px" });
+    const bar = document.createElement("div");
+    Object.assign(bar.style, { display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "10px" });
+    const buttons = {};
+    for (const [name, text, primary] of [["fill", "채우기", true], ["prev", "◀ 이전"], ["next", "건너뛰기 ▶"], ["all", "남은 칸 모두 채우기"], ["undo", "되돌리기"], ["close", "닫기"]]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = text;
+      Object.assign(button.style, { padding: "4px 10px", border: "0", borderRadius: "6px", cursor: "pointer", font: "inherit",
+        background: primary ? "#3b82f6" : "#4b5563", color: "#fff" });
+      button.addEventListener("click", () => act(name));
+      buttons[name] = button;
+      bar.append(button);
+    }
+    box.append(head, body, status, bar);
+    document.body.append(box);
+
+    const current = () => items[cursor];
+    function show() {
+      items.forEach(item => { const element = elements.get(item.token); if (element) outline(element, false); });
+      const item = current();
+      if (item) {
+        const element = elements.get(item.token);
+        if (element?.isConnected) outline(element, true);
+        const state = done.get(item.token);
+        head.textContent = `AutoFolio 하나씩 채우기 · ${cursor + 1} / ${items.length}`;
+        body.textContent = `${item.label || "입력칸"} → ${preview(item)}${state ? `  (${state === "filled" ? "채움" : "확인 필요"})` : ""}`;
+      } else {
+        head.textContent = `AutoFolio 하나씩 채우기 · 끝`;
+        body.textContent = `채움 ${[...done.values()].filter(state => state === "filled").length}개 · 확인 필요 ${[...done.values()].filter(state => state !== "filled").length}개. 새로 열린 칸은 확장을 다시 열어 분석하세요. 제출 전에 확인하세요.`;
+      }
+      status.textContent = note;
+      buttons.fill.disabled = buttons.all.disabled = busy || !item;
+      buttons.prev.disabled = busy || cursor === 0;
+      buttons.next.disabled = busy || !item;
+      buttons.undo.disabled = busy || !fillHistory.length;
+      for (const button of Object.values(buttons)) button.style.opacity = button.disabled ? ".5" : "1";
+    }
+    async function fillAt(indexes, label) {
+      const snaps = [];
+      const results = [];
+      for (const index of indexes) {
+        const result = await fillRecorded(items[index], snaps);
+        done.set(items[index].token, result.status);
+        results.push(result);
+      }
+      fillHistory.push({ label, snaps, cursor: indexes[0] });
+      return results;
+    }
+    async function act(name) {
+      if (busy) return;
+      if (name === "close") { close(); return; }
+      if (name === "prev") cursor = Math.max(0, cursor - 1);
+      if (name === "next") cursor = Math.min(items.length, cursor + 1);
+      if (name === "fill" || name === "all") {
+        busy = true;
+        show();
+        const indexes = name === "fill" ? [cursor] : items.map((_, index) => index).slice(cursor);
+        const results = await fillAt(indexes, name === "fill" ? current().label || "입력칸" : `남은 칸 ${indexes.length}개`);
+        note = name === "fill" ? results[0].detail : `${results.filter(result => result.status === "filled").length}/${results.length}개 채움`;
+        cursor = Math.min(items.length, indexes.at(-1) + 1);
+        busy = false;
+      }
+      if (name === "undo") {
+        const undone = undoLast();
+        if (undone) {
+          note = `되돌림: ${undone.label} (${undone.changed}곳)`;
+          if (undone.cursor !== undefined) {
+            cursor = undone.cursor;
+            for (const item of items.slice(cursor)) done.delete(item.token);
+          }
+        }
+      }
+      show();
+    }
+    function close() {
+      items.forEach(item => { const element = elements.get(item.token); if (element) outline(element, false); });
+      box.remove();
+      stepBar = null;
+    }
+    stepBar = { close };
+    show();
   }
 
   async function fillOne(item) {
@@ -627,6 +893,11 @@
     if (!element?.isConnected) return { token: item.token, status: "skipped", detail: "필드가 바뀌었습니다. 다시 분석하세요." };
     const value = String(item.value ?? "").trim();
     if (!value) return { token: item.token, status: "skipped", detail: "저장된 값 없음" };
+    const part = partOf.get(element);
+    if (part) {
+      if (part.index > 0) return { token: item.token, status: "skipped", detail: "앞 칸과 함께 입력" };
+      return await fillParts(item, part.members, value);
+    }
     try {
       if (element.readOnly) {
         return { token: item.token, status: "review", detail: "읽기 전용 칸입니다. 옆의 검색 버튼(예: 우편번호)으로 입력하세요." };
@@ -682,18 +953,24 @@
       addRows(message.key, Math.min(message.times, 10)).then(added => sendResponse({ added }));
       return true;
     }
+    if (message.action === "step") {
+      startSteps(message.items);
+      sendResponse({ started: message.items.length });
+    }
+    if (message.action === "undo") {
+      const undone = undoLast();
+      if (undone) undoNotice(`"${undone.label}"을 되돌렸습니다(${undone.changed}곳).`);
+      sendResponse({ undone: undone ? { label: undone.label, changed: undone.changed } : null, left: fillHistory.length });
+    }
     if (message.action === "fill") {
       (async () => {
         // One at a time: search lists from different fields would otherwise overlap.
         const results = [];
         loginWaited = false;
         log(`${message.items.length}개 칸 입력 시작`);
-        for (const item of message.items) {
-          const result = await fillOne(item);
-          const element = elements.get(item.token);
-          log(`${result.status.padEnd(7)} ${item.token} ${element ? labelFor(element) || element.name : ""} — ${result.detail}`);
-          results.push(result);
-        }
+        const snaps = [];
+        for (const item of message.items) results.push(await fillRecorded(item, snaps));
+        fillHistory.push({ label: `${message.label || "모두 채우기"} ${results.length}칸`, snaps });
         // Controlled inputs can rerender after an event. Verify once more after the page settles.
         await wait(350);
         for (const result of results) {
@@ -715,11 +992,9 @@
         const newFields = countFields() - elements.size;
         if (newFields > 0) log(`선택 후 새로 열린 칸 ${newFields}개`);
         // Logging in closed the extension popup, so its report and follow-up fill are gone; say it here.
-        if (loginWaited) {
-          const opened = newFields > 0 ? ` 새로 열린 칸 ${newFields}개는 확장을 다시 열어 분석하면 채울 수 있습니다.` : "";
-          const notice = showNotice(`입력을 마쳤습니다. 입력 ${counts.filled || 0}개, 직접 확인 ${counts.review || 0}개.${opened} 제출 전에 확인하세요.`, [["ok", "닫기"]]);
-          notice.choice.then(notice.close);
-        }
+        // The notice also offers undo, like an editor after "replace all".
+        const opened = loginWaited && newFields > 0 ? ` 새로 열린 칸 ${newFields}개는 확장을 다시 열어 분석하면 채울 수 있습니다.` : "";
+        undoNotice(`입력을 마쳤습니다. 입력 ${counts.filled || 0}개, 직접 확인 ${counts.review || 0}개.${opened} 제출 전에 확인하세요.`);
         sendResponse({ results, invalidFields, newFields: Math.max(0, newFields) });
       })();
       return true;

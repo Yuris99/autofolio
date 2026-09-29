@@ -13,7 +13,7 @@ button:hover { background: #1848ad; }
 button:disabled { opacity: .5; cursor: default; }
 button.secondary { background: #e7ecf7; color: #173872; }
 button.link { background: none; color: #2358d0; padding: 4px; }
-.actions { display: flex; gap: 8px; margin: 14px 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
 .toggle { display: block; margin-top: 12px; font-size: 13px; }
 #status { font-size: 13px; color: #39485f; }
 .field { padding: 11px 0; border-top: 1px solid #dce3ef; }
