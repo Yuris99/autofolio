@@ -10,7 +10,8 @@ import { promisify } from "node:util";
 
 // Runs fixture pages in headless Chrome and reads the result each writes to <body>.
 // Pages are served over http because Chrome blocks ES module imports from file://.
-const chrome = [process.env.CHROME_PATH, "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"]
+const chrome = [process.env.CHROME_PATH, "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", "/usr/bin/google-chrome", "/usr/bin/chromium",
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"]
   .find(path => path && existsSync(path));
 const skip = !chrome && "Chrome를 찾지 못함 (CHROME_PATH 지정)";
 const root = fileURLToPath(new URL("..", import.meta.url));

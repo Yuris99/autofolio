@@ -2,8 +2,9 @@
 <html lang="ko">
 <meta charset="utf-8">
 <title>AutoFolio 로그인 창 검증</title>
-<!-- Picking "Toeic Speaking test" opens a login window, like recruiter.co.kr's YBM score lookup.
-     AutoFolio must stop there: report it, and neither unlock nor fill the row. -->
+<!-- Picking an exam opens a login window, like recruiter.co.kr's YBM score lookup. AutoFolio tells
+     the user on the page and waits. Row 1: the user logs in and the window closes, then the site
+     opens the score field and AutoFolio carries on. Row 2: the user presses "skip". -->
 <script>
   let listener;
   window.chrome = { runtime: { onMessage: { addListener(callback) { listener = callback; }, removeListener() {} } } };
@@ -15,23 +16,52 @@
     <input type="text" class="hidden" name="languageExam[0].languageExamCode" data-rel-id="languageExam[0]" style="position:absolute;width:0;height:0;opacity:0">
     <label>취득점수 <input name="languageExam[0].score" data-rel-target="languageExam[0]" disabled></label>
   </div>
+  <div class="row loop" data-loop="languageExam">
+    <div class="search"><label><input type="search" placeholder="키워드 입력 후 &quot;Enter&quot;로 검색"><span>시험검색</span></label><div class="searchResult"></div></div>
+    <input type="hidden" name="languageExam[1].languageExamName"><span class="searchResultName"></span>
+    <input type="text" class="hidden" name="languageExam[1].languageExamCode" data-rel-id="languageExam[1]" style="position:absolute;width:0;height:0;opacity:0">
+    <label>취득점수 <input name="languageExam[1].score" data-rel-target="languageExam[1]" disabled></label>
+  </div>
 </section>
 <script>
-  const input = document.querySelector("input[type='search']");
-  const row = input.closest(".row");
-  input.addEventListener("keydown", event => {
-    if (event.keyCode !== 13) return;
-    setTimeout(() => {
-      const list = row.querySelector(".searchResult");
-      list.innerHTML = '<ul class="searchResultList"><li><button type="button" class="ellipsis"><li>Toeic Speaking test</li></button></li></ul>';
-      list.querySelector("button").addEventListener("click", () => {
-        row.querySelector('[name$="ExamName"]').value = "Toeic Speaking test";
-        row.querySelector(".searchResultName").textContent = "Toeic Speaking test";
-        list.replaceChildren();
-        window.open("about:blank", "ybmLogin", "width=400,height=500");
-      });
-    }, 200);
+  const exams = ["Toeic Speaking test", "OPIc"];
+  document.querySelectorAll("input[type='search']").forEach((input, index) => {
+    const row = input.closest(".row");
+    input.addEventListener("keydown", event => {
+      if (event.keyCode !== 13) return;
+      setTimeout(() => {
+        const list = row.querySelector(".searchResult");
+        list.innerHTML = `<ul class="searchResultList"><li><button type="button" class="ellipsis"><li>${exams[index]}</li></button></li></ul>`;
+        list.querySelector("button").addEventListener("click", () => {
+          row.querySelector('[name$="ExamName"]').value = exams[index];
+          row.querySelector(".searchResultName").textContent = exams[index];
+          list.replaceChildren();
+          const login = window.open("about:blank", `ybmLogin${index}`, "width=400,height=500");
+          if (index !== 0) return;
+          // The user logs in; the window closes and the site loads the score (ybmValidateDone).
+          setTimeout(() => login.close(), 2000);
+          const done = setInterval(() => {
+            if (!login.closed) return;
+            clearInterval(done);
+            const score = row.querySelector('[name$="score"]');
+            score.disabled = false;
+            score.value = "150";
+          }, 100);
+        });
+      }, 200);
+    });
   });
+  // Row 2's user skips from the notice AutoFolio shows on the page.
+  let noticeSeen = 0;
+  new MutationObserver(() => {
+    const notice = document.querySelector("[data-autofolio-notice]");
+    if (!notice || notice.dataset.seen) return;
+    notice.dataset.seen = "1";
+    noticeSeen++;
+    if (/OPIc/.test(notice.textContent)) {
+      setTimeout(() => [...notice.querySelectorAll("button")].find(button => button.textContent === "이 줄 건너뛰기").click(), 300);
+    }
+  }).observe(document.body, { childList: true });
 </script>
 <script src="../extension/page-bridge.js"></script>
 <script src="../extension/option-match.js"></script>
@@ -39,15 +69,23 @@
 <script type="module">
   const send = message => new Promise(resolve => listener(message, null, resolve));
   const { fields } = await send({ action: "scan" });
-  const box = fields.find(field => field.inputType === "search");
-  const { results } = await send({ action: "fill", items: [{ token: box.token, value: "토익스피킹" }] });
-  const [result] = results;
+  const boxes = fields.filter(field => field.inputType === "search");
+  const { results } = await send({ action: "fill", items: [
+    { token: boxes[0].token, value: "토익스피킹" },
+    { token: boxes[1].token, value: "OPIc" }
+  ] });
+  const [loggedIn, skipped] = results;
+  const summary = document.querySelector("[data-autofolio-notice]");
   const checks = {
-    stoppedForLogin: result.status === "review" && /로그인/.test(result.detail),
-    rowLeftLocked: document.querySelector('[name="languageExam[0].score"]').disabled
+    carriedOnAfterLogin: loggedIn.status === "filled" && /로그인 후/.test(loggedIn.detail),
+    siteOpenedScore: !document.querySelector('[name="languageExam[0].score"]').disabled,
+    skippedRowIsReview: skipped.status === "review" && /건너뛰기/.test(skipped.detail),
+    skippedRowLeftLocked: document.querySelector('[name="languageExam[1].score"]').disabled,
+    toldUserOnPage: noticeSeen >= 2,
+    summaryShown: !!summary && /입력을 마쳤습니다/.test(summary.textContent)
   };
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
   document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
-  document.body.dataset.testDetails = JSON.stringify({ failed, result });
+  document.body.dataset.testDetails = JSON.stringify({ failed, results });
 </script>
 </html>

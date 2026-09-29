@@ -380,6 +380,64 @@
     if (Number(document.documentElement.dataset.autofolioPopupAt || 0) >= since) return true;
     return [...loginSignals()].some(node => !before.has(node));
   }
+  // Logged in (or given up): every window the page opened is closed and the login layer is gone.
+  function loginClosed(before) {
+    if (document.documentElement.dataset.autofolioPopupOpen) return false;
+    return ![...loginSignals()].some(node => !before.has(node));
+  }
+
+  // A notice on the page itself: the extension popup closes as soon as the user clicks elsewhere,
+  // e.g. into the login window, so it cannot be where the user is told what is going on.
+  function showNotice(text, buttons = []) {
+    document.querySelector("[data-autofolio-notice]")?.remove();
+    const box = document.createElement("div");
+    box.dataset.autofolioNotice = "";
+    box.setAttribute("role", "alert");
+    Object.assign(box.style, {
+      position: "fixed", top: "16px", left: "50%", transform: "translateX(-50%)", zIndex: "2147483647",
+      maxWidth: "min(480px, calc(100vw - 32px))", padding: "14px 18px", borderRadius: "10px",
+      background: "#1f2937", color: "#fff", font: "14px/1.5 system-ui, sans-serif", boxShadow: "0 6px 24px rgba(0,0,0,.3)"
+    });
+    const message = document.createElement("div");
+    message.textContent = `AutoFolio · ${text}`;
+    box.append(message);
+    const choice = new Promise(resolve => {
+      if (!buttons.length) return;
+      const bar = document.createElement("div");
+      Object.assign(bar.style, { display: "flex", gap: "8px", marginTop: "10px", justifyContent: "flex-end" });
+      for (const [value, label] of buttons) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        Object.assign(button.style, { padding: "5px 12px", border: "0", borderRadius: "6px", cursor: "pointer", font: "inherit",
+          background: value === buttons[0][0] ? "#3b82f6" : "#4b5563", color: "#fff" });
+        button.addEventListener("click", () => resolve(value));
+        bar.append(button);
+      }
+      box.append(bar);
+    });
+    document.body.append(box);
+    return { choice, close: () => box.remove() };
+  }
+
+  const LOGIN_WAIT_MS = 10 * 60 * 1000;
+  let loginWaited = false;
+
+  // Tell the user to log in and wait until the login window or layer closes. The user can also
+  // say it is done (a layer that stays after login) or skip the row. AutoFolio never types into it.
+  async function waitForLogin(name, before) {
+    const notice = showNotice(`"${name}"을 고르자 로그인 창이 열렸습니다. 로그인하면 이어서 채웁니다. 로그인 정보는 AutoFolio가 입력하지 않습니다.`,
+      [["done", "로그인 완료"], ["skip", "이 줄 건너뛰기"]]);
+    let answer = null;
+    notice.choice.then(value => { answer = value; });
+    const until = Date.now() + LOGIN_WAIT_MS;
+    while (!answer && Date.now() < until) {
+      await wait(500);
+      if (!answer && loginClosed(before)) answer = "closed";
+    }
+    notice.close();
+    return answer || "timeout";
+  }
 
   function linkedFields(row) {
     return [...row.querySelectorAll("[data-rel-id]")].flatMap(source => source.dataset.relId
@@ -511,9 +569,17 @@
     const pickedAt = Date.now();
     choose(options[picked.index]);
     await wait(300);
+    let loginNote = "";
     if (loginOpened(loginBefore, pickedAt)) {
-      log(`로그인 창이 열려 멈춤: ${texts[picked.index]}`);
-      return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 고르자 로그인 창이 열렸습니다(예: YBM 성적 조회). 직접 로그인하면 사이트가 성적을 불러옵니다. AutoFolio는 로그인 정보를 입력하지 않고 이 줄은 채우지 않습니다.` };
+      log(`로그인 창이 열려 대기: ${texts[picked.index]}`);
+      loginWaited = true;
+      const answer = await waitForLogin(texts[picked.index], loginBefore);
+      log(`로그인 대기 끝 (${answer}): ${texts[picked.index]}`);
+      if (answer === "skip" || answer === "timeout") {
+        const why = answer === "skip" ? "건너뛰기를 눌러" : "10분 동안 로그인이 끝나지 않아";
+        return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 고르자 로그인 창이 열렸고(예: YBM 성적 조회), ${why} 이 줄은 채우지 않았습니다. AutoFolio는 로그인 정보를 입력하지 않습니다.` };
+      }
+      loginNote = " · 로그인 후 이어서 진행";
     }
     await finishPick(element, options[picked.index], before);
     const stillOpen = visibleOptions(element).some(option => options.includes(option));
@@ -525,9 +591,9 @@
       const settled = await waitForLinkedFields(row, 4000);
       const opened = settled ? 0 : await openLinkedFields(row);
       const lockedNote = opened ? ` · 사이트가 열지 않은 세부 칸 ${opened}개를 직접 열었음` : "";
-      return { token: item.token, status: "filled", detail: `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}${check}${lockedNote}` };
+      return { token: item.token, status: "filled", detail: `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}${check}${loginNote}${lockedNote}` };
     }
-    return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 선택했지만 화면에서 확인되지 않습니다. 확인하세요.` };
+    return { token: item.token, status: "review", detail: `"${texts[picked.index]}"을 선택했지만 화면에서 확인되지 않습니다${loginNote}. 확인하세요.` };
   }
 
   function formattedValue(element, value) {
@@ -620,6 +686,7 @@
       (async () => {
         // One at a time: search lists from different fields would otherwise overlap.
         const results = [];
+        loginWaited = false;
         log(`${message.items.length}개 칸 입력 시작`);
         for (const item of message.items) {
           const result = await fillOne(item);
@@ -647,6 +714,12 @@
         // Picking a certificate can enable its issuer and date fields, which the first scan skipped.
         const newFields = countFields() - elements.size;
         if (newFields > 0) log(`선택 후 새로 열린 칸 ${newFields}개`);
+        // Logging in closed the extension popup, so its report and follow-up fill are gone; say it here.
+        if (loginWaited) {
+          const opened = newFields > 0 ? ` 새로 열린 칸 ${newFields}개는 확장을 다시 열어 분석하면 채울 수 있습니다.` : "";
+          const notice = showNotice(`입력을 마쳤습니다. 입력 ${counts.filled || 0}개, 직접 확인 ${counts.review || 0}개.${opened} 제출 전에 확인하세요.`, [["ok", "닫기"]]);
+          notice.choice.then(notice.close);
+        }
         sendResponse({ results, invalidFields, newFields: Math.max(0, newFields) });
       })();
       return true;
