@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>AutoFolio 검색 방식 검증</title>
+<!-- Every way a form makes you search for a value, with made-up data:
+     A. type, then [검색]: a list appears under the box
+     B. [찾기] first: a layer on the page with its own search box and a table of results
+     C. [조회] first: a layer holding a same-site frame with the search inside it
+     D. Kakao postcode: a layer frame that talks by message (stand-in for postcode-frame.js)
+     E. [찾기] opens a new window; the user picks there and the window closes -->
+<style>
+  .row { margin: 6px 0; } input { width: 220px; }
+  .layer { position: fixed; top: 40px; left: 40px; background: #fff; border: 1px solid #333; padding: 10px; }
+  .layer iframe { width: 360px; height: 200px; border: 0; }
+</style>
+<script>
+  let listener;
+  window.chrome = { runtime: { onMessage: { addListener(callback) { listener = callback; }, removeListener() {} } } };
+</script>
+<section><h3>학력</h3>
+  <div class="row"><label for="school">학교명</label> <input id="school" name="school" placeholder="학교명을 입력하세요">
+    <button type="button" id="schoolSearch">검색</button><ul class="search-result-list" id="schoolList"></ul></div>
+  <div class="row"><label for="major">전공</label> <input id="major" name="major" readonly> <button type="button" id="majorFind">전공 찾기</button></div>
+</section>
+<section><h3>자격증</h3>
+  <div class="row"><label for="cert">자격증명</label> <input id="cert" name="cert" readonly> <button type="button" id="certFind">찾기</button></div>
+</section>
+<section><h3>어학</h3>
+  <div class="row"><label for="exam">시험명</label> <input id="exam" name="exam" readonly> <button type="button" id="examFind">조회</button></div>
+</section>
+<section><h3>주소</h3>
+  <div class="row"><label for="zip">우편번호</label> <input id="zip" name="zip" readonly> <button type="button" id="zipFind">우편번호 찾기</button></div>
+  <div class="row"><label for="addr">주소</label> <input id="addr" name="addr" readonly></div>
+</section>
+<script>
+  const $ = id => document.getElementById(id);
+  const schools = ["숭실대학교", "숭실사이버대학교", "서울대학교"];
+  // A. The site searches for what is typed in the box and lists results under it.
+  $("schoolSearch").addEventListener("click", () => setTimeout(() => {
+    const query = $("school").value.replace(/\s/g, "");
+    $("schoolList").innerHTML = "";
+    for (const name of schools.filter(name => name.includes(query.slice(0, 2)))) {
+      const li = document.createElement("li");
+      li.textContent = name;
+      li.addEventListener("click", () => { $("school").value = name; $("schoolList").innerHTML = ""; });
+      $("schoolList").append(li);
+    }
+  }, 200));
+
+  // B. A layer with its own search box; results are table rows with a 선택 button.
+  $("certFind").addEventListener("click", () => {
+    const layer = document.createElement("div");
+    layer.className = "layer";
+    layer.innerHTML = `<p>자격증 찾기</p><input id="certQuery"> <button type="button" id="certGo">검색</button>
+      <table><thead><tr><th>자격증</th><th></th></tr></thead><tbody id="certRows"></tbody></table>`;
+    document.body.append(layer);
+    layer.querySelector("#certGo").addEventListener("click", () => setTimeout(() => {
+      const query = layer.querySelector("#certQuery").value.replace(/\s/g, "");
+      const rows = layer.querySelector("#certRows");
+      rows.innerHTML = "";
+      for (const name of ["정보처리기사", "정보처리산업기사", "정보처리기능사"].filter(name => name.startsWith(query.slice(0, 4)))) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${name}</td><td><button type="button">선택</button></td>`;
+        tr.querySelector("button").addEventListener("click", () => { $("cert").value = name; layer.remove(); });
+        rows.append(tr);
+      }
+    }, 200));
+  });
+
+  // C. A layer holding a same-site frame; the pick is handed back to the page.
+  $("examFind").addEventListener("click", () => {
+    const layer = document.createElement("div");
+    layer.className = "layer popup";
+    layer.innerHTML = `<iframe></iframe>`;
+    document.body.append(layer);
+    const frame = layer.querySelector("iframe");
+    frame.srcdoc = `<!doctype html><meta charset="utf-8"><input id="q"> <button type="button" id="go">검색</button><ul id="list"></ul>
+      <script>
+        document.getElementById("go").addEventListener("click", () => setTimeout(() => {
+          const q = document.getElementById("q").value.toLowerCase();
+          const list = document.getElementById("list");
+          list.innerHTML = "";
+          for (const name of ["TOEIC", "TOEIC Speaking", "TOEFL iBT"].filter(name => name.toLowerCase().startsWith(q.slice(0, 3)))) {
+            const li = document.createElement("li");
+            li.innerHTML = "<a href='#'></a>";
+            li.firstChild.textContent = name;
+            li.firstChild.addEventListener("click", event => { event.preventDefault(); parent.pickExam(name); });
+            list.append(li);
+          }
+        }, 200));
+      <\/script>`;
+  });
+  window.pickExam = name => { $("exam").value = name; document.querySelector(".layer.popup")?.remove(); };
+
+  // D. Kakao postcode stand-in: a layer frame that says it is ready, takes a search by message,
+  // and fills the page's boxes the way a site's Kakao callback does, then answers with a result.
+  $("zipFind").addEventListener("click", () => {
+    const layer = document.createElement("div");
+    layer.className = "layer postcode";
+    layer.innerHTML = `<iframe></iframe>`;
+    document.body.append(layer);
+    layer.querySelector("iframe").srcdoc = `<!doctype html><meta charset="utf-8"><p>우편번호 검색</p><script>
+      const say = message => parent.postMessage({ autofolio: "postcode", ...message }, "*");
+      say({ type: "ready" });
+      addEventListener("message", event => {
+        const data = event.data;
+        if (data?.autofolio === "postcode-ping") say({ type: "ready" });
+        if (data?.autofolio === "postcode-search") setTimeout(() => {
+          parent.kakaoComplete({ zonecode: "06236", roadAddress: "서울 강남구 테헤란로 152" });
+          say({ type: "result", id: data.id, status: "filled", detail: "06236 서울 강남구 테헤란로 152 선택", zonecode: "06236", address: "서울 강남구 테헤란로 152" });
+        }, 300);
+      });
+    <\/script>`;
+  });
+  window.kakaoComplete = data => {
+    $("zip").value = data.zonecode;
+    $("addr").value = data.roadAddress;
+    document.querySelector(".layer.postcode")?.remove();
+  };
+
+  // E. The site's own search window; the person picks there and it closes.
+  $("majorFind").addEventListener("click", () => {
+    const win = window.open("about:blank", "majorSearch", "width=400,height=400");
+    setTimeout(() => { $("major").value = "컴퓨터학부"; win?.close(); }, 1500);
+  });
+</script>
+<script src="../extension/page-bridge.js"></script>
+<script src="../extension/option-match.js"></script>
+<script src="../extension/content.js"></script>
+<script type="module">
+  import { classify } from "../extension/matcher.js";
+  const values = {
+    "education.school": "숭실대학교", "education.major": "컴퓨터학부", "certificate.name": "정보처리기사", "language.test": "TOEIC",
+    "personal.zipCode": "06236", "personal.address": "서울특별시 강남구 테헤란로 152 (강남파이낸스센터) 12층"
+  };
+  const send = message => new Promise(resolve => listener(message, null, resolve));
+  const { fields } = await send({ action: "scan" });
+  const items = fields.map(field => ({ token: field.token, type: classify(field).type }))
+    .filter(item => values[item.type]).map(item => ({ ...item, value: values[item.type] }));
+  const { results } = await send({ action: "fill", items });
+  const byType = Object.fromEntries(items.map(item => [item.type, results.find(result => result.token === item.token)]));
+  const $ = id => document.getElementById(id);
+  const checks = {
+    classified: items.length === 6,
+    typeThenSearch: byType["education.school"]?.status === "filled" && $("school").value === "숭실대학교",
+    layerSearch: byType["certificate.name"]?.status === "filled" && $("cert").value === "정보처리기사" && !document.querySelector(".layer:not(.popup):not(.postcode)"),
+    layerFrameSearch: byType["language.test"]?.status === "filled" && $("exam").value === "TOEIC",
+    kakaoPostcode: byType["personal.zipCode"]?.status === "filled" && byType["personal.address"]?.status === "filled" &&
+      $("zip").value === "06236" && $("addr").value === "서울 강남구 테헤란로 152",
+    newWindowLeftToUser: ["filled", "review"].includes(byType["education.major"]?.status)
+  };
+  const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
+  document.body.dataset.testResult = failed.length ? "FAIL" : "PASS";
+  document.body.dataset.testDetails = JSON.stringify({ failed, items: items.map(item => item.type), results });
+</script>
+</html>

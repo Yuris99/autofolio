@@ -65,17 +65,20 @@
     const useJibun = !sameAddress(request.query, row.roadText) && sameAddress(request.query, row.jibunText);
     const target = (useJibun ? row.jibun : row.road) || row.road || row.jibun;
     if (!target) return { status: "review", detail: "주소 결과를 누를 수 없습니다. 직접 고르세요." };
-    target.click();
-    return { status: "filled", detail: `주소 검색에서 "${row.zip} ${useJibun ? row.jibunText : row.roadText}" 선택`, zonecode: row.zip, address: useJibun ? row.jibunText : row.roadText };
+    // Clicking hands the pick to the site, which usually closes this frame at once; answer first
+    // (finish() sends this before calling click), or the answer would be lost with the frame.
+    return { status: "filled", detail: `주소 검색에서 "${row.zip} ${useJibun ? row.jibunText : row.roadText}" 선택`, zonecode: row.zip,
+      address: useJibun ? row.jibunText : row.roadText, click: () => target.click() };
   }
 
   // After a search reloads the frame: wait for results (or "no results") and answer the request.
   async function finish(request) {
     for (let waited = 0; waited < 6000 && !results().length && !noResults(); waited += 200) await wait(200);
     sessionStorage.removeItem(KEY);
-    const answer = results().length ? pick(request)
+    const { click, ...answer } = results().length ? pick(request)
       : { status: "review", detail: `주소 검색 결과가 없습니다 ("${request.query}"). 직접 검색하세요.` };
     say({ type: "result", id: request.id, ...answer });
+    click?.();
   }
 
   function search(request) {

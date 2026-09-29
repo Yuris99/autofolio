@@ -259,7 +259,7 @@
   const values = allValues(profile);
   const send = message => new Promise(resolve => listener(message, null, resolve));
   const typeOf = field => classify(field).type;
-  // What the popup does when the user accepts every suggestion.
+  // What the popup does when the user accepts every suggestion; like the popup, each item carries its type.
   const plan = fields => fields.map(field => {
     const type = typeOf(field);
     const key = defaultChoice(field, type, values.filter(item => item.type === type));
@@ -275,7 +275,7 @@
   const typeOfName = name => planned.find(entry => entry.field.name === name)?.type ?? null;
   const byName = Object.fromEntries(first.fields.filter(field => field.name).map(field => [field.name, field]));
   const searchBoxes = kind => planned.filter(entry => entry.field.label.startsWith(kind));
-  const response = await send({ action: "fill", items: planned.filter(entry => entry.value).map(entry => ({ token: entry.field.token, value: entry.value })) });
+  const response = await send({ action: "fill", items: planned.filter(entry => entry.value).map(entry => ({ token: entry.field.token, value: entry.value, type: entry.type })) });
   const statusOf = token => response.results.find(result => result.token === token)?.status;
   const status = Object.fromEntries(first.fields.filter(field => field.name).map(field => [field.name, statusOf(field.token)]));
   const value = name => document.querySelector(`[name="${name}"]`)?.value;
@@ -285,7 +285,7 @@
   // and date fields and the exam's score, date and number.
   const second = await send({ action: "scan" });
   const opened = followUpItems(new Set(first.fields.map(fieldId)), second.fields, typeOf, values);
-  const secondResponse = await send({ action: "fill", items: opened.map(({ token, value }) => ({ token, value })) });
+  const secondResponse = await send({ action: "fill", items: opened.map(({ token, value, type }) => ({ token, value, type })) });
 
   const checks = {
     labelsFromRowTitles: byName["military.militaryPositionCode"]?.label === "계급" && byName.nationality?.label === "국적",

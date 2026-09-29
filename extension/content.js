@@ -977,13 +977,18 @@
     }
   }
 
-  async function postcodeSearch(query, zip) {
+  // The frame reloads to search, then answers. If the site closes the frame on the pick before the
+  // answer arrives, the box having filled is the answer.
+  async function postcodeSearch(query, zip, element, before) {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     postcode.source.postMessage({ autofolio: "postcode-search", id, query, zip }, "*");
-    // The frame reloads to search, then answers.
     for (let waited = 0; waited < 15000; waited += 200) {
       await wait(200);
       if (postcode.results.has(id)) return postcode.results.get(id);
+      if (element && read(element) !== before && read(element).trim()) {
+        await wait(400);
+        return postcode.results.get(id) || { status: "filled", detail: `주소 검색으로 채워짐 (${read(element).trim()})` };
+      }
     }
     return { status: "review", detail: "우편번호 검색이 응답하지 않습니다. 직접 검색하세요." };
   }
@@ -1087,12 +1092,31 @@
       ? `${why} 저장된 값을 검색 없이 넣었습니다. 사이트가 검색 결과로만 받는 칸이면 직접 검색하세요.` : `${why} 직접 검색하세요.` };
   }
 
+  // Kakao writes 시·도 short ("서울 강남구 테헤란로 152"); saved addresses often have them long and add
+  // a building and floor ("서울특별시 강남구 테헤란로 152 (강남파이낸스센터) 12층"). Same rule as postcode-frame.js.
+  const REGIONS = [["서울특별시", "서울"], ["부산광역시", "부산"], ["대구광역시", "대구"], ["인천광역시", "인천"], ["광주광역시", "광주"],
+    ["대전광역시", "대전"], ["울산광역시", "울산"], ["세종특별자치시", "세종"], ["경기도", "경기"], ["강원특별자치도", "강원"], ["강원도", "강원"],
+    ["충청북도", "충북"], ["충청남도", "충남"], ["전북특별자치도", "전북"], ["전라북도", "전북"], ["전라남도", "전남"], ["경상북도", "경북"],
+    ["경상남도", "경남"], ["제주특별자치도", "제주"]];
+  function addressKey(text) {
+    let plain = String(text || "").replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+    plain = plain.match(/^.*?(로|길|동|리|가)\s*(지하\s*)?\d+(-\d+)?/)?.[0] || plain;
+    for (const [long, short] of REGIONS) if (plain.startsWith(long)) plain = short + plain.slice(long.length);
+    return plain.replace(/[\s,·]+/g, "");
+  }
+  // One starts with the other and the number does not go on ("테헤란로 15" is not "테헤란로 152").
+  function sameAddress(a, b) {
+    const [x, y] = [addressKey(a), addressKey(b)];
+    const prefix = (long, short) => long.startsWith(short) && !/[\d-]/.test(long[short.length] || "");
+    return Boolean(x && y) && (prefix(x, y) || prefix(y, x));
+  }
+
   async function fillViaButton(item, element, value) {
     const address = ADDRESS_TYPES.test(item.type || "");
     // Kakao may already have filled this box while handling the zip code (or the other way round).
-    const squashed = text => String(text || "").replace(/\s+/g, "");
-    const now = squashed(read(element));
-    if (address && element.readOnly && now && (now === squashed(value) || squashed(value).startsWith(now) || now.startsWith(squashed(value).slice(0, 8)))) {
+    const now = read(element).trim();
+    const zip = /zipCode$/.test(item.type || "");
+    if (address && element.readOnly && now && (zip ? now.replace(/\D/g, "") === value.replace(/\D/g, "") : sameAddress(value, now))) {
       return { token: item.token, status: "filled", detail: "주소 검색으로 채워짐" };
     }
     const button = searchButtonFor(element);
@@ -1111,7 +1135,7 @@
       if (waited % 1000 === 0) pingFrames();
       if (postcode.readyAt >= pressedAt && postcode.source) {
         if (!address) break;
-        const answer = await postcodeSearch(query, fillValues["personal.zipCode"] || "");
+        const answer = await postcodeSearch(query, fillValues["personal.zipCode"] || "", element, before);
         for (let settle = 0; settle < 2000 && read(element) === before; settle += 150) await wait(150);
         if (answer.status === "filled" && read(element) !== before) return { token: item.token, status: "filled", detail: answer.detail };
         return { token: item.token, status: "review", detail: answer.detail || "주소 검색 결과가 칸에 들어가지 않았습니다. 확인하세요." };

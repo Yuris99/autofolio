@@ -55,3 +55,4 @@ test("a pick that opens a login window is handed to the user", { skip }, () => r
 test("split boxes, example formats, step-by-step fill and undo", { skip }, () => runFixture("parts-fixture.html"));
 test("popup ranks candidates and preselects values, with and without Laya", { skip }, () => runFixture("popup-fixture.html"));
 test("newer forms: div labels, sample placeholders, one name per radio", { skip }, () => runFixture("v1-fixture.html"));
+test("search buttons: type then search, layers, a layer frame, Kakao postcode, a new window", { skip }, () => runFixture("search-fixture.html"));
