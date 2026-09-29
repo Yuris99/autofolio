@@ -97,7 +97,7 @@ function render(values, suggestions) {
     const select = valueSelect(values, chosen);
     wrapper.append(label, note, select);
     fieldsRoot.append(wrapper);
-    choices.push({ token: field.token, select });
+    choices.push({ token: field.token, select, wrapper });
   }
   fillButton.disabled = stepButton.disabled = !fields.length || !values.length;
 }
@@ -180,13 +180,56 @@ async function chosenItems() {
     .map(choice => ({ token: choice.token, value: values.get(choice.select.value), label: labelOf(choice.token) })) };
 }
 
-// Like an editor's "replace one by one": a bar on the page walks through the chosen fields.
+// Like an editor's "replace one by one": the page bar and this panel walk through the chosen
+// fields together, and the list below scrolls to the current one.
+const stepPanel = document.getElementById("stepPanel");
+function showStep(step) {
+  for (const choice of choices) {
+    choice.wrapper.classList.toggle("current", !step.closed && choice.token === step.token);
+    const state = step.done?.[choice.token];
+    let mark = choice.wrapper.querySelector(".step-mark");
+    if (!state) { mark?.remove(); continue; }
+    if (!mark) {
+      mark = document.createElement("span");
+      mark.className = "step-mark";
+      choice.wrapper.prepend(mark);
+    }
+    mark.textContent = state === "filled" ? "✓" : "?";
+    mark.style.color = state === "filled" ? "#1d6b43" : "#b45309";
+  }
+  stepPanel.hidden = Boolean(step.closed);
+  if (step.closed) return;
+  document.getElementById("stepText").textContent = step.finished
+    ? `끝 · 채움 ${Object.values(step.done).filter(state => state === "filled").length}개`
+    : `${step.cursor + 1} / ${step.total} · ${step.label} → ${step.preview}`;
+  document.getElementById("stepNote").textContent = step.note;
+  for (const button of stepPanel.querySelectorAll("button")) {
+    const name = button.dataset.step;
+    button.disabled = step.busy || (["fill", "all", "next"].includes(name) && step.finished) ||
+      (name === "prev" && step.cursor === 0) || (name === "undo" && !step.undoable);
+  }
+  choices.find(choice => choice.token === step.token)?.wrapper.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
 stepButton.addEventListener("click", async () => {
   const { items } = await chosenItems();
   if (!items.length) { setStatus("채울 항목을 먼저 선택하세요."); return; }
-  await send("step", { items });
+  showStep(await send("step", { items }));
   undoButton.disabled = false;
-  setStatus(`지원서 페이지 오른쪽 아래 바에서 ${items.length}칸을 하나씩 채우세요. 채우기·건너뛰기·이전·되돌리기를 쓸 수 있습니다.`);
+  setStatus(`${items.length}칸을 하나씩 채웁니다. 위 버튼이나 지원서 페이지 오른쪽 아래 바를 쓰세요. 페이지를 누르면 이 창은 닫히지만 바는 남습니다.`);
+});
+
+stepPanel.addEventListener("click", async event => {
+  const name = event.target.closest("button")?.dataset.step;
+  if (!name) return;
+  // A search pick can take seconds; show it as busy until the page answers.
+  for (const button of stepPanel.querySelectorAll("button")) button.disabled = true;
+  try { showStep(await send("stepAct", { name })); } catch (error) { setStatus(`하나씩 채우기 실패: ${error.message}`); }
+});
+
+// Clicks on the page bar also move this list, while the popup is open.
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message.event === "stepState" && sender.tab?.id === tabId) showStep(message.step);
 });
 
 undoButton.addEventListener("click", async () => {

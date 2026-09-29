@@ -11,6 +11,14 @@
   <p class="muted">지원서에서 분석한 입력칸을 확인하고 채우세요. 제출은 직접 합니다.</p>
   <label class="toggle"><input id="useLaya" type="checkbox"> 로컬 Laya로 모르는 칸 분석</label>
   <div class="actions"><button id="scan">현재 페이지 분석</button><button id="fill" disabled>모두 채우기</button><button id="step" disabled>하나씩 채우기</button><button id="undo" disabled>되돌리기</button></div>
+  <div id="stepPanel" hidden>
+    <div id="stepText"></div>
+    <div class="step-buttons">
+      <button data-step="fill">채우기</button><button data-step="prev" class="secondary">◀ 이전</button><button data-step="next" class="secondary">건너뛰기 ▶</button>
+      <button data-step="all" class="secondary">남은 칸 모두</button><button data-step="undo" class="secondary">되돌리기</button><button data-step="close" class="link">닫기</button>
+    </div>
+    <small id="stepNote" class="muted"></small>
+  </div>
   <p id="status" role="status">이력을 저장한 뒤 지원서 페이지에서 분석하세요.</p>
   <div id="fields"></div>
   <div id="report" aria-live="polite"></div>

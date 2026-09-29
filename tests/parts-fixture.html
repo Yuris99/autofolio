@@ -4,7 +4,9 @@
 <title>AutoFolio 나뉜 칸·예시 형식·하나씩 채우기·되돌리기 검증</title>
 <script>
   let listener;
-  window.chrome = { runtime: { onMessage: { addListener(callback) { listener = callback; }, removeListener() {} } } };
+  const announced = [];
+  window.chrome = { runtime: { onMessage: { addListener(callback) { listener = callback; }, removeListener() {} },
+    sendMessage: message => { announced.push(message); return Promise.resolve(); } } };
 </script>
 <table>
   <tr><th>휴대폰</th><td>
@@ -83,7 +85,12 @@
   click("남은 칸 모두 채우기");
   await wait(100);
   checks.stepRest = $("email2").value === "example.com" && $("year").value === "1999" && /끝/.test(document.querySelector("[data-autofolio-bar]").textContent);
+  // The popup drives the same steps and hears where the bar is.
+  checks.announced = announced.some(message => message.event === "stepState" && message.step.finished);
+  const fromPopup = await send({ action: "stepAct", name: "prev" });
+  checks.popupStep = fromPopup.cursor === 2 && fromPopup.token === by("year").token && fromPopup.done[by("hp1").token] === "filled";
   click("닫기");
+  checks.closedAnnounced = announced.at(-1).step.closed === true;
   checks.barClosed = !document.querySelector("[data-autofolio-bar]") && !$("hp1").style.outline;
 
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);

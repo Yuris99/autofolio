@@ -37,3 +37,10 @@ section { background: white; border: 1px solid #dce3ef; border-radius: 12px; pad
 footer.log { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 14px; padding-top: 10px; border-top: 1px solid #dce3ef; }
 footer.log .muted { flex: 1; }
 #saved { margin-left: 10px; color: #1d6b43; }
+#stepPanel { position: sticky; top: -16px; z-index: 1; margin: 0 -16px; padding: 10px 16px; background: #1f2937; color: white; font-size: 13px; }
+#stepPanel .step-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+#stepPanel button { padding: 5px 10px; }
+#stepPanel button.link { color: #cbd5e1; }
+#stepPanel .muted { color: #cbd5e1; }
+.field.current { background: #e8f0ff; box-shadow: inset 3px 0 #2358d0; padding-left: 8px; }
+.field .step-mark { float: right; font-weight: 600; }

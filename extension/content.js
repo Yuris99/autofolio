@@ -786,6 +786,11 @@
     return element && !isSearchInput(element) ? formattedValue(element, String(item.value)) : String(item.value);
   }
 
+  // Tell an open extension popup where the step bar is. Nothing listens when the popup is closed.
+  function announce(step) {
+    try { chrome.runtime.sendMessage?.({ event: "stepState", step })?.catch?.(() => {}); } catch { /* popup closed or extension reloaded */ }
+  }
+
   function startSteps(items) {
     stepBar?.close();
     let cursor = 0;
@@ -841,6 +846,13 @@
       buttons.next.disabled = busy || !item;
       buttons.undo.disabled = busy || !fillHistory.length;
       for (const button of Object.values(buttons)) button.style.opacity = button.disabled ? ".5" : "1";
+      announce(state());
+    }
+    // What the extension popup shows beside its own list, so it can follow along.
+    function state() {
+      const item = current();
+      return { total: items.length, cursor, busy, note, finished: !item, undoable: fillHistory.length > 0,
+        token: item?.token || null, label: item?.label || "", preview: item ? preview(item) : "", done: Object.fromEntries(done) };
     }
     async function fillAt(indexes, label) {
       const snaps = [];
@@ -854,8 +866,8 @@
       return results;
     }
     async function act(name) {
-      if (busy) return;
-      if (name === "close") { close(); return; }
+      if (busy) return state();
+      if (name === "close") { close(); return { closed: true }; }
       if (name === "prev") cursor = Math.max(0, cursor - 1);
       if (name === "next") cursor = Math.min(items.length, cursor + 1);
       if (name === "fill" || name === "all") {
@@ -878,13 +890,15 @@
         }
       }
       show();
+      return state();
     }
     function close() {
       items.forEach(item => { const element = elements.get(item.token); if (element) outline(element, false); });
       box.remove();
       stepBar = null;
+      announce({ closed: true });
     }
-    stepBar = { close };
+    stepBar = { close, act, state };
     show();
   }
 
@@ -944,6 +958,7 @@
 
   function onMessage(message, _sender, sendResponse) {
     if (message.action === "scan") {
+      stepBar?.close(); // its fields' tokens are about to change
       const fields = scan();
       log(`입력칸 ${fields.length}개 분석`);
       console.table?.(fields.map(({ token, label, section, name, inputType, required }) => ({ token, label, section, name, inputType, required })));
@@ -955,7 +970,12 @@
     }
     if (message.action === "step") {
       startSteps(message.items);
-      sendResponse({ started: message.items.length });
+      sendResponse(stepBar.state());
+    }
+    if (message.action === "stepAct") {
+      if (!stepBar) sendResponse({ closed: true });
+      else stepBar.act(message.name).then(sendResponse);
+      return true;
     }
     if (message.action === "undo") {
       const undone = undoLast();
