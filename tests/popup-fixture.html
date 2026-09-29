@@ -13,7 +13,9 @@
     ["학교명", "UniversityName"], ["학교명", "UniversityDepart", "select"], ["전공", "UniversityMajor"],
     ["기간", "UstartdateY", "text", { index: 0, count: 2 }], ["기간", "UstartdateM", "text", { index: 1, count: 2 }],
     ["", "License"], ["", "LicenseNumber"], ["", "LicenseComplete", "select"],
-    ["ㅇ 본인은 병역의무를 필한자 또는 면제된 자임을 확인함", "subcheck_box2", "checkbox"]
+    ["ㅇ 본인은 병역의무를 필한자 또는 면제된 자임을 확인함", "subcheck_box2", "checkbox"],
+    // The bundled default answers (learned-default.json) say this list is not a profile field.
+    ["전공", "MgraduateGrade", "select"]
   ].map(([label, name, inputType = "text", part = null], index) => ({
     token: `af-${index + 1}`, label, name, inputType, part, section: "금융보안원 입사지원서", placeholder: "", title: "", ariaLabel: "", id: "", options: [], loop: null
   }));
@@ -25,7 +27,9 @@
     }
   };
   const layaCalls = [];
+  const realFetch = window.fetch.bind(window);
   window.fetch = async (url, init) => {
+    if (String(url).includes("learned-default.json")) return realFetch(url);
     const body = JSON.parse(init.body);
     layaCalls.push(body.state.name);
     // Laya is sure UniversityDepart is the school list, against the rules' "major".
@@ -48,7 +52,7 @@
       },
       session: { async get() { return {}; }, async set() {} }
     },
-    runtime: { getManifest: () => ({ version: "test" }), onMessage: { addListener() {} }, openOptionsPage() {} }
+    runtime: { getManifest: () => ({ version: "test" }), getURL: path => `../extension/${path}`, onMessage: { addListener() {} }, openOptionsPage() {} }
   };
 </script>
 <body class="popup">
@@ -60,7 +64,7 @@
   <div id="fields"></div>
   <div id="report"></div>
   <footer><span id="logSummary"></span><button id="exportLog">기록</button><button id="clearLog">지우기</button></footer>
-  <footer><span id="learnSummary"></span><button id="exportLearned">학습</button><button id="clearLearned">지우기</button></footer>
+  <footer><span id="learnSummary"></span><button id="manageLearned">관리</button></footer>
 <script type="module">
   await import("../extension/popup.js");
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -91,6 +95,7 @@
   checks.certificate = value("License") === "certificate.name:0" && value("LicenseNumber") === "certificate.number:0";
   checks.completeEmpty = value("LicenseComplete") === "";
   checks.statementEmpty = value("subcheck_box2") === "";
+  checks.defaultLessonApplied = value("MgraduateGrade") === "";
   checks.rulesPickMajorForDepart = value("UniversityDepart") === "education.major:1";
   const zipSelect = document.querySelectorAll("#fields select")[shown.findIndex(field => field.name === "Zipcode2")];
   checks.recommendedGroup = zipSelect.querySelector("optgroup")?.label === "추천 순위" && /%/.test(zipSelect.querySelector("optgroup option").textContent);
@@ -113,7 +118,7 @@
   document.getElementById("teach").click();
   await wait(50);
   checks.taught = store.learned?.some(example => example.name === "UniversityDepart" && example.type === "none") &&
-    /학습한 답 \d+건/.test(document.getElementById("learnSummary").textContent);
+    /가르친 답 \d+건/.test(document.getElementById("learnSummary").textContent);
   await analyse();
   checks.lessonApplied = value("UniversityDepart") === "" && /이력 아님/.test(select("UniversityDepart").closest(".field").textContent);
   checks.othersUnchanged = value("UniversityMajor") === "education.major:1" && value("Zipcode2") === "personal.zipCode:0";

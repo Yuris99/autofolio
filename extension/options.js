@@ -1,4 +1,5 @@
 import { cleanProfile, LONG_FIELDS, PROFILE_SCHEMA } from "./matcher.js";
+import { addExamples, defaultLearned, readLearnedFile } from "./learn.js";
 
 const form = document.getElementById("profileForm");
 const saved = document.getElementById("saved");
@@ -117,7 +118,46 @@ importFile.addEventListener("change", async () => {
   }
 });
 
+// Learned answers: import merges into the user's own answers (the file wins for the same field).
+const learnedCount = document.getElementById("learnedCount");
+async function showLearned(message = "") {
+  const { learned = [] } = await chrome.storage.local.get("learned");
+  const defaults = await defaultLearned();
+  learnedCount.textContent = `내 답 ${learned.length}건 · 기본 ${defaults.length}건${message ? ` · ${message}` : ""}`;
+}
+document.getElementById("exportLearned").addEventListener("click", async () => {
+  const { learned = [] } = await chrome.storage.local.get("learned");
+  const data = { app: "autofolio", kind: "learned-answers", version: 1, exportedAt: new Date().toISOString(), examples: learned };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `autofolio-학습-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+const learnedFile = document.getElementById("learnedFile");
+document.getElementById("importLearned").addEventListener("click", () => learnedFile.click());
+learnedFile.addEventListener("change", async () => {
+  const [file] = learnedFile.files;
+  learnedFile.value = "";
+  if (!file) return;
+  try {
+    const imported = readLearnedFile(JSON.parse(await file.text()));
+    const { learned = [] } = await chrome.storage.local.get("learned");
+    await chrome.storage.local.set({ learned: addExamples(learned, imported) });
+    await showLearned(`${imported.length}건 불러옴`);
+  } catch (error) {
+    await showLearned(`불러오기 실패: ${error instanceof SyntaxError ? "JSON 파일이 아닙니다." : error.message}`);
+  }
+});
+document.getElementById("clearLearned").addEventListener("click", async () => {
+  if (!confirm("내가 가르친 답을 모두 지울까요? 기본으로 들어 있는 답은 남습니다.")) return;
+  await chrome.storage.local.set({ learned: [] });
+  await showLearned("지웠습니다");
+});
+
 const { profile = {} } = await chrome.storage.local.get("profile");
 render(profile);
+await showLearned();
 const version = chrome.runtime?.getManifest?.().version;
 if (version) document.getElementById("version").textContent = `v${version}`;

@@ -19,6 +19,17 @@
         <input type="file" id="importFile" accept=".json,application/json" hidden>
       </div>
     </section>
+    <section class="backup">
+      <h2>학습한 답</h2>
+      <p class="muted">지원서에서 고쳐 준 정답입니다. 칸의 설명과 정답 항목만 있고 이력 값은 없어서, 다른 PC로 옮기거나 공유해도 됩니다. 확장에 기본으로 들어 있는 답 위에 더해지고, 같은 칸이면 내 답이 우선합니다.</p>
+      <p id="learnedCount" class="muted"></p>
+      <div class="actions">
+        <button type="button" id="exportLearned" class="secondary">파일로 내려받기</button>
+        <button type="button" id="importLearned" class="secondary">파일에서 불러오기</button>
+        <button type="button" id="clearLearned" class="secondary">모두 지우기</button>
+        <input type="file" id="learnedFile" accept=".json,application/json" hidden>
+      </div>
+    </section>
     <form id="profileForm"></form>
     <div class="savebar"><button type="submit" form="profileForm">이력 저장</button><span id="saved" role="status"></span></div>
   </main>

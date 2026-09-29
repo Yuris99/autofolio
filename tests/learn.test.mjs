@@ -47,3 +47,18 @@ test("a new answer for the same field replaces the old one; unknown items are dr
   assert.deepEqual(examples.map(example => example.type), [NONE]);
   assert.equal(addExamples(examples, [exampleOf({ label: "x", name: "y" }, NONE, "c")], 1).length, 1);
 });
+
+import { readFileSync } from "node:fs";
+import { mergeLearned, readLearnedFile } from "../extension/learn.js";
+
+test("learned files are read cleanly and the user's answer beats the bundled one", () => {
+  assert.throws(() => readLearnedFile({ nothing: true }), /학습 파일/);
+  const read = readLearnedFile({ examples: [{ label: "전공", name: "MgraduateGrade", type: "none", extra: "x" }, { name: "x", type: "bad.type" }, null] });
+  assert.deepEqual(read.map(example => [example.name, example.type, "extra" in example]), [["MgraduateGrade", "none", false]]);
+  const bundled = readLearnedFile(JSON.parse(readFileSync(new URL("../extension/learned-default.json", import.meta.url), "utf8")));
+  assert.ok(bundled.length >= 2);
+  const own = [{ ...bundled[0], type: "education.major" }];
+  const merged = mergeLearned(bundled, own);
+  assert.equal(merged.length, bundled.length);
+  assert.equal(merged.find(example => example.name === bundled[0].name).type, "education.major");
+});

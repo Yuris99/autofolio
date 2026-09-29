@@ -1,0 +1,10 @@
+{
+  "app": "autofolio",
+  "kind": "learned-answers",
+  "version": 1,
+  "note": "확장에 같이 들어가는 기본 학습. 사용자가 내려받은 학습 파일을 tools/merge-learned.mjs로 합친다. 칸 설명과 정답 항목만 있고 이력 값은 없다.",
+  "examples": [
+    { "label": "전공", "placeholder": "", "title": "", "name": "MgraduateGrade", "section": "", "inputType": "select", "type": "none", "site": "https://fsec.incruit.com", "at": "2026-09-29T00:00:00.000Z" },
+    { "label": "전공", "placeholder": "", "title": "", "name": "DgraduateGrade", "section": "", "inputType": "select", "type": "none", "site": "https://fsec.incruit.com", "at": "2026-09-29T00:00:00.000Z" }
+  ]
+}

@@ -1,6 +1,6 @@
 import { allValues, classify, describeType, FIELD_TYPES, PROFILE_SCHEMA, rank } from "./matcher.js";
 import { addFill, createRun, saveRun, summarize } from "./run-log.js";
-import { addExamples, applyLearned, buildModel, exampleOf, learnedVotes, NONE } from "./learn.js";
+import { addExamples, applyLearned, buildModel, defaultLearned, exampleOf, learnedVotes, mergeLearned, NONE } from "./learn.js";
 import { combineRanks, defaultChoice, fieldId, followUpItems, layaCriteria, refineRanks, rowsToAdd } from "./plan.js";
 
 const fieldsRoot = document.getElementById("fields");
@@ -154,7 +154,7 @@ async function analysePage(siteMappings) {
   fields = scanResult.fields;
   pageUrl = scanResult.url;
   const { learned = [] } = await chrome.storage.local.get("learned");
-  const model = buildModel(learned);
+  const model = buildModel(mergeLearned(await defaultLearned(), learned));
   const own = new Map(fields.map(field => {
     const mapped = siteMappings[fieldKey(field)];
     return [field.token, FIELD_TYPES.includes(mapped) ? [{ type: mapped, score: 100, reasons: ["이전에 확인한 매핑"], mapped: true }]
@@ -191,7 +191,7 @@ async function learn(added) {
 }
 
 function showLearnSummary(learned) {
-  learnSummary.textContent = learned.length ? `학습한 답 ${learned.length}건` : "학습한 답 없음";
+  learnSummary.textContent = learned.length ? `내가 가르친 답 ${learned.length}건` : "가르친 답 없음";
 }
 
 function reportRows(entries) {
@@ -427,24 +427,8 @@ document.getElementById("teach").addEventListener("click", async () => {
   setStatus(taught ? `${taught}칸의 답을 학습했습니다. 다음 분석부터 다른 사이트에도 반영됩니다.` : "학습할 답이 없습니다. 값을 고르거나 잘못된 제안을 지우세요.");
 });
 
-// Learned answers hold field descriptions and items only, no profile values, so they can be shared
-// or used as training data (docs/laya.md).
-document.getElementById("exportLearned").addEventListener("click", async () => {
-  const { learned = [] } = await chrome.storage.local.get("learned");
-  const data = { app: "autofolio", kind: "learned-answers", version: 1, exportedAt: new Date().toISOString(), examples: learned };
-  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `autofolio-학습-${new Date().toISOString().slice(0, 10)}.json`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-});
-
-document.getElementById("clearLearned").addEventListener("click", async () => {
-  if (!confirm("학습한 답을 모두 지울까요?")) return;
-  await chrome.storage.local.set({ learned: [] });
-  showLearnSummary([]);
-});
+// Importing, exporting and clearing answers live on the options page: a file dialog would close this popup.
+document.getElementById("manageLearned").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
 const { useLaya = false, runLog = [], learned: learnedAtStart = [] } = await chrome.storage.local.get(["useLaya", "runLog", "learned"]);
 layaToggle.checked = useLaya;

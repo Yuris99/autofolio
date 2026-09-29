@@ -81,3 +81,32 @@ export function applyLearned(list, votes) {
   }
   return [...merged.values()].sort((a, b) => b.score - a.score);
 }
+
+// A learned-answers file (exported from the popup, or the bundled default) → clean examples.
+// Only known items and plain strings are kept; anything else in the file is ignored.
+export function readLearnedFile(data) {
+  const list = Array.isArray(data?.examples) ? data.examples : Array.isArray(data) ? data : null;
+  if (!list) throw new Error("학습 파일 형식이 아닙니다.");
+  const text = value => String(value ?? "").slice(0, 120);
+  return addExamples([], list.filter(example => example && typeof example === "object").map(example => ({
+    label: text(example.label), placeholder: text(example.placeholder), title: text(example.title), name: text(example.name),
+    section: text(example.section), inputType: text(example.inputType), type: text(example.type), site: text(example.site),
+    at: text(example.at)
+  })), Infinity);
+}
+
+// The answers bundled with the extension (learned-default.json). Empty when it cannot be read.
+export async function defaultLearned() {
+  try {
+    const response = await fetch(chrome.runtime.getURL("learned-default.json"));
+    return readLearnedFile(await response.json());
+  } catch {
+    return [];
+  }
+}
+
+// The answers ranking uses: the bundled defaults, with the user's own answers replacing any default
+// for the same field.
+export function mergeLearned(defaults, own) {
+  return addExamples(defaults, own, Infinity);
+}
