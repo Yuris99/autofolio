@@ -126,6 +126,13 @@ powershell -ExecutionPolicy Bypass -File tools\laya-serve.ps1
 - **이력 아님 선택지:** 선택지에 소재지·본분교·주야·학적 상태·동의 체크·다른 사람 정보 같은 "이력 아님" 항목(`plan.js`의 `NOT_PROFILE_CHOICES`)을 넣는다. 이게 없으면 Laya는 소재지 목록도 "학교명"(99%)으로 답했다.
 - **Laya만 제안한 항목:** 규칙에 없고 Laya만 제안한 항목은 추천 목록에 보여 주기만 하고 자동으로 고르지 않는다.
 
+## 사용자가 가르친 답과 파인튜닝
+
+팝업에서 고친 답은 `learned`에 쌓인다(`extension/learn.js`). 칸 설명(label, placeholder, title, name, section, inputType)과 정답 항목(`type`, 이력이 아니면 `none`)의 쌍이다.
+
+- **순위에 반영하는 방법:** 분석할 때 칸의 단어 집합이 가르친 칸과 얼마나 겹치는지(자카드 유사도) 본다. 30% 이상, 그리고 공통 단어가 2개 이상이면(완전히 같으면 1개도 됨) `20 × 유사도`만큼 그 답에 점수를 준다. 완전히 같은 칸의 답(20점)은 규칙의 판단과 라벨 점수를 합친 것보다 크다.
+- **Laya 파인튜닝:** Laya는 요청할 때 예시를 받는 기능이 없고, 공식 파인튜닝 노트북(`notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb`, Kaggle T4 2장, 질문 약 3만 개에 4~5시간)으로 다시 학습한다. **학습 내려받기** 파일의 `examples`는 그대로 `state`(칸 설명)와 정답 `choice`로 바꿔 넣을 수 있다. 수천 건은 모인 뒤에 할 일이다.
+
 ## 가중치 조정
 
 진단 기록에는 칸마다 상위 후보 3개와 비율(`candidates`), 사용자가 실제로 고른 항목(`chosen`)이 남는다. 기록이 쌓이면 이것을 정답 데이터로 삼아 `WEIGHTS`와 `LAYA_WEIGHT`를 맞출 수 있다. 예를 들어 1순위가 틀렸을 때 정답이 몇 순위였는지, 그리고 Laya를 켰을 때와 껐을 때 정답률이 어떻게 다른지 비교한다.

@@ -1,5 +1,6 @@
 import { allValues, classify, describeType, FIELD_TYPES, PROFILE_SCHEMA, rank } from "./matcher.js";
 import { addFill, createRun, saveRun, summarize } from "./run-log.js";
+import { addExamples, applyLearned, buildModel, exampleOf, learnedVotes, NONE } from "./learn.js";
 import { combineRanks, defaultChoice, fieldId, followUpItems, layaCriteria, refineRanks, rowsToAdd } from "./plan.js";
 
 const fieldsRoot = document.getElementById("fields");
@@ -19,6 +20,8 @@ let currentRun = null;
 let lastEntries = {};
 const sessionStore = chrome.storage.session || chrome.storage.local;
 const logSummary = document.getElementById("logSummary");
+const learnSummary = document.getElementById("learnSummary");
+const typeName = type => (type === NONE ? "이력 아님" : describeType(type));
 
 async function recordRun(run) {
   const { runLog = [] } = await chrome.storage.local.get("runLog");
@@ -125,39 +128,70 @@ function render(values, suggestions) {
     const note = document.createElement("small");
     const suggestion = suggestions.get(field.token) || { candidates: [] };
     const ranked = suggestion.candidates.slice(0, TOP_CANDIDATES)
-      .map(candidate => `${describeType(candidate.type)} ${Math.round(share(candidate, suggestion.candidates) * 100)}%`).join(", ");
+      .map(candidate => `${typeName(candidate.type)} ${Math.round(share(candidate, suggestion.candidates) * 100)}%`).join(", ");
     note.textContent = [field.section, field.inputType, suggestion.reason, ranked && `후보: ${ranked}`].filter(Boolean).join(" · ");
     // The best-ranked candidate that has a clear saved value starts selected.
     const withLevel = { ...field, level: suggestion.level };
     let chosen = "";
     for (const candidate of suggestion.candidates.filter(candidate => !candidate.layaOnly)) {
+      if (candidate.type === NONE) break; // learned: not a profile field
       chosen = defaultChoice(withLevel, candidate.type, values.filter(item => item.type === candidate.type), lastEntries);
       if (chosen) break;
     }
     const select = valueSelect(values, chosen, suggestion.candidates);
     wrapper.append(label, note, select);
     fieldsRoot.append(wrapper);
-    choices.push({ token: field.token, select, wrapper });
+    // What was preselected, so a change the user makes can be learned as an answer.
+    choices.push({ token: field.token, select, wrapper, initial: chosen, field });
   }
   fillButton.disabled = stepButton.disabled = !fields.length || !values.length;
 }
 
 // Scan the page and rank profile items per field: a mapping confirmed on this site before, else
-// the rules' weighted clues plus neighbouring fields (plan.refineRanks).
+// the rules' weighted clues plus what the user taught (learn.js) plus neighbouring fields (plan.refineRanks).
 async function analysePage(siteMappings) {
   const scanResult = await send("scan");
   fields = scanResult.fields;
   pageUrl = scanResult.url;
+  const { learned = [] } = await chrome.storage.local.get("learned");
+  const model = buildModel(learned);
   const own = new Map(fields.map(field => {
     const mapped = siteMappings[fieldKey(field)];
-    return [field.token, FIELD_TYPES.includes(mapped) ? [{ type: mapped, score: 100, reasons: ["이전에 확인한 매핑"], mapped: true }] : rank(field)];
+    return [field.token, FIELD_TYPES.includes(mapped) ? [{ type: mapped, score: 100, reasons: ["이전에 확인한 매핑"], mapped: true }]
+      : applyLearned(rank(field), learnedVotes(model, field))];
   }));
   const { ranks, levels } = refineRanks(fields, own);
   return new Map(fields.map(field => {
     const candidates = ranks.get(field.token) || [];
-    const reason = candidates[0] ? candidates[0].reasons.join(" + ") : classify(field).reason;
-    return [field.token, { type: candidates[0]?.type || null, reason, candidates, level: levels.get(field.token) ?? null }];
+    const top = candidates[0];
+    const reason = !top ? classify(field).reason : top.type === NONE ? `이력 아님 (${top.reasons.join(" + ")})` : top.reasons.join(" + ");
+    return [field.token, { type: top && top.type !== NONE ? top.type : null, reason, candidates, level: levels.get(field.token) ?? null }];
   }));
+}
+
+// Answers from the list: a value picked for a field teaches its item, and a preselected value the
+// user cleared teaches "not a profile field". With all = true every picked value counts, not only changes.
+function lessons(all) {
+  const site = new URL(pageUrl).origin;
+  return choices.flatMap(choice => {
+    const selected = choice.select.value;
+    if (selected && (all || selected !== choice.initial)) return [exampleOf(choice.field, selected.slice(0, selected.lastIndexOf(":")), site)];
+    if (!selected && choice.initial) return [exampleOf(choice.field, NONE, site)];
+    return [];
+  });
+}
+
+async function learn(added) {
+  if (!added.length) return 0;
+  const { learned = [] } = await chrome.storage.local.get("learned");
+  const updated = addExamples(learned, added);
+  await chrome.storage.local.set({ learned: updated });
+  showLearnSummary(updated);
+  return added.length;
+}
+
+function showLearnSummary(learned) {
+  learnSummary.textContent = learned.length ? `학습한 답 ${learned.length}건` : "학습한 답 없음";
 }
 
 function reportRows(entries) {
@@ -309,6 +343,8 @@ fillButton.addEventListener("click", async () => {
       if (field) siteMappings[fieldKey(field)] = selected.slice(0, selected.lastIndexOf(":"));
     }
     await chrome.storage.local.set({ siteMappings });
+    // Fields the user changed are answers; they improve the ranking on every site.
+    const taught = await learn(lessons(false));
     const labelOf = token => { const field = fields.find(field => field.token === token); return field?.label || field?.name || token; };
     let { results, invalidFields = [], newFields = 0 } = await send("fill", { items });
     undoButton.disabled = false;
@@ -357,7 +393,8 @@ fillButton.addEventListener("click", async () => {
     const filledCount = results.filter(result => result.status === "filled").length;
     const followNote = followed ? ` (새로 열린 칸 ${followed}개 포함)` : "";
     const opened = newFields ? ` · 아직 새로 열린 칸 ${newFields}개: 다시 분석하세요` : "";
-    setStatus(`${filledCount}/${results.length}개 입력 확인${followNote}${reviewCount ? ` · ${reviewCount}개 직접 선택 필요(?)` : ""}${opened}. 내용을 확인한 뒤 직접 제출하세요.`);
+    const taughtNote = taught ? ` · 고친 칸 ${taught}개를 학습함` : "";
+    setStatus(`${filledCount}/${results.length}개 입력 확인${followNote}${reviewCount ? ` · ${reviewCount}개 직접 선택 필요(?)` : ""}${opened}${taughtNote}. 내용을 확인한 뒤 직접 제출하세요.`);
   } catch (error) {
     setStatus(`입력 실패: ${error.message}`);
     if (currentRun) { currentRun.notes.push(`입력 실패: ${error.message}`); await recordRun(currentRun); }
@@ -382,7 +419,35 @@ document.getElementById("clearLog").addEventListener("click", async () => {
   showLogSummary([]);
 });
 
-const { useLaya = false, runLog = [] } = await chrome.storage.local.get(["useLaya", "runLog"]);
+// Save the current list as answers without filling: every picked value, and cleared suggestions as "not a profile field".
+document.getElementById("teach").addEventListener("click", async () => {
+  if (!choices.length) { setStatus("먼저 페이지를 분석하세요."); return; }
+  const taught = await learn(lessons(true));
+  for (const choice of choices) choice.initial = choice.select.value;
+  setStatus(taught ? `${taught}칸의 답을 학습했습니다. 다음 분석부터 다른 사이트에도 반영됩니다.` : "학습할 답이 없습니다. 값을 고르거나 잘못된 제안을 지우세요.");
+});
+
+// Learned answers hold field descriptions and items only, no profile values, so they can be shared
+// or used as training data (docs/laya.md).
+document.getElementById("exportLearned").addEventListener("click", async () => {
+  const { learned = [] } = await chrome.storage.local.get("learned");
+  const data = { app: "autofolio", kind: "learned-answers", version: 1, exportedAt: new Date().toISOString(), examples: learned };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `autofolio-학습-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
+document.getElementById("clearLearned").addEventListener("click", async () => {
+  if (!confirm("학습한 답을 모두 지울까요?")) return;
+  await chrome.storage.local.set({ learned: [] });
+  showLearnSummary([]);
+});
+
+const { useLaya = false, runLog = [], learned: learnedAtStart = [] } = await chrome.storage.local.get(["useLaya", "runLog", "learned"]);
 layaToggle.checked = useLaya;
 showLogSummary(runLog);
+showLearnSummary(learnedAtStart);
 document.getElementById("version").textContent = `v${chrome.runtime.getManifest().version}`;

@@ -10,7 +10,7 @@
   <header><h1>AutoFolio <small id="version" class="muted"></small></h1><button id="profile" class="link">내 이력 편집</button></header>
   <p class="muted">지원서에서 분석한 입력칸을 확인하고 채우세요. 제출은 직접 합니다.</p>
   <label class="toggle"><input id="useLaya" type="checkbox"> 로컬 Laya로 후보 순위 보정</label>
-  <div class="actions"><button id="scan">현재 페이지 분석</button><button id="fill" disabled>모두 채우기</button><button id="step" disabled>하나씩 채우기</button><button id="undo" disabled>되돌리기</button></div>
+  <div class="actions"><button id="scan">현재 페이지 분석</button><button id="fill" disabled>모두 채우기</button><button id="step" disabled>하나씩 채우기</button><button id="undo" disabled>되돌리기</button><button id="teach" class="secondary" title="채우지 않고 지금 목록을 정답으로 저장합니다">학습만 저장</button></div>
   <div id="stepPanel" hidden>
     <div id="stepText"></div>
     <div class="step-buttons">
@@ -25,6 +25,10 @@
   <footer class="log">
     <span id="logSummary" class="muted"></span>
     <button id="exportLog" class="link">기록 내려받기</button><button id="clearLog" class="link">지우기</button>
+  </footer>
+  <footer class="log">
+    <span id="learnSummary" class="muted"></span>
+    <button id="exportLearned" class="link">학습 내려받기</button><button id="clearLearned" class="link">지우기</button>
   </footer>
   <script type="module" src="popup.js"></script>
 </body>
