@@ -311,6 +311,8 @@
         token,
         label,
         part: part ? { index: part.index, count: part.members.length } : null,
+        readOnly: Boolean(element.readOnly),
+        searchButton: (() => { const button = radios ? null : searchButtonFor(element); return button ? buttonText(button).replace(/\s+/g, " ").trim().slice(0, 40) : ""; })(),
         ariaLabel: element.getAttribute("aria-label") || "",
         placeholder: element.getAttribute("placeholder") || "",
         title: element.getAttribute("title") || "",
@@ -931,6 +933,232 @@
     show();
   }
 
+  // ── Search buttons ─────────────────────────────────────────────────────────────────────────────
+  // Fields a site fills through its own search: type, then press [검색]; or press [검색]/[우편번호 찾기]
+  // first and pick in what opens. What opens is found, not assumed: a list beside the box, a layer
+  // (or a same-origin frame in it), Kakao's postcode search (postcode-frame.js answers from inside
+  // it), or a new window, which is left to the user. If nothing works the saved value goes in
+  // directly and the field is marked for checking.
+  const SEARCH_BUTTON = /검색|찾기|조회|search|find|우편\s*번호|주소/i;
+  const NOT_SEARCH = /삭제|취소|초기화|닫기|close|reset|remove|delete|clear/i;
+  const SEARCH_TYPES = /^(education\.school|certificate\.name|language\.test|personal\.(zipCode|address))$/;
+  const ADDRESS_TYPES = /^personal\.(zipCode|address)$/;
+  const CLICKABLE = "button, a, input[type='button'], input[type='image'], input[type='submit'], [role='button']";
+  let fillValues = {};
+
+  function buttonText(button) {
+    return [button.textContent, button.value, button.title, button.getAttribute("aria-label"), button.getAttribute("alt"),
+      button.querySelector?.("img")?.alt, typeof button.className === "string" ? button.className : ""].filter(Boolean).join(" ");
+  }
+  const isSearchButton = button => SEARCH_BUTTON.test(buttonText(button)) && !NOT_SEARCH.test(buttonText(button));
+
+  function searchButtonFor(element) {
+    let node = element.parentElement;
+    for (let depth = 0; node && node !== document.body && depth < 3; depth++, node = node.parentElement) {
+      const found = [...node.querySelectorAll(CLICKABLE)].find(button => button !== element && visible(button) && isSearchButton(button));
+      if (found) return found;
+    }
+    return null;
+  }
+
+  // Kakao's postcode frames say "ready" when they load or when pinged; results come back by id.
+  const postcode = { source: null, readyAt: 0, results: new Map() };
+  if (globalThis.__autofolioMessages) window.removeEventListener("message", globalThis.__autofolioMessages);
+  globalThis.__autofolioMessages = event => {
+    const data = event.data;
+    if (data?.autofolio !== "postcode") return;
+    if (data.type === "ready") { postcode.source = event.source; postcode.readyAt = Date.now(); }
+    if (data.type === "result") postcode.results.set(data.id, data);
+  };
+  window.addEventListener("message", globalThis.__autofolioMessages);
+  function pingFrames(win = window) {
+    for (let index = 0; index < win.frames.length; index++) {
+      try { win.frames[index].postMessage({ autofolio: "postcode-ping" }, "*"); pingFrames(win.frames[index]); } catch { /* gone */ }
+    }
+  }
+
+  async function postcodeSearch(query, zip) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    postcode.source.postMessage({ autofolio: "postcode-search", id, query, zip }, "*");
+    // The frame reloads to search, then answers.
+    for (let waited = 0; waited < 15000; waited += 200) {
+      await wait(200);
+      if (postcode.results.has(id)) return postcode.results.get(id);
+    }
+    return { status: "review", detail: "우편번호 검색이 응답하지 않습니다. 직접 검색하세요." };
+  }
+
+  // Layers that can hold a search: dialog-like containers, and anything around a text box that was
+  // not on screen before the button was pressed.
+  const DIALOG = "[role='dialog'], dialog[open], .modal, [class*='layer' i], [class*='popup' i], [class*='pop_' i], [id*='layer' i], [id*='popup' i], [id*='modal' i]";
+  const ours = node => node.closest("[data-autofolio-notice], [data-autofolio-bar]");
+  function textBoxes(root) {
+    return [...root.querySelectorAll("input:not([type]), input[type='text'], input[type='search']")].filter(input => visible(input) && !ours(input));
+  }
+  function openLayers() {
+    const found = [...document.querySelectorAll(DIALOG)].filter(node => !ours(node) && visible(node) && node.querySelector("input, iframe, li, tr"));
+    return found.filter(node => !found.some(other => other !== node && other.contains(node)));
+  }
+  // The document to work in: a same-origin frame inside the layer, else the layer itself.
+  function layerRoot(layer) {
+    for (const frame of layer.querySelectorAll("iframe")) {
+      try { if (frame.contentDocument?.body) return frame.contentDocument.body; } catch { /* another domain: Kakao answers by message */ }
+    }
+    return layer;
+  }
+
+  // Result rows in a layer: table rows, list items, options. Page numbers and headers are not results.
+  function rowsIn(root) {
+    const rows = [...root.querySelectorAll("tbody tr, li, [role='option']")].filter(row => visible(row) && !row.closest("thead") &&
+      !row.querySelector("input[type='text'], input[type='search']") && textOf(row) && !/^(\d+|이전|다음|처음|마지막|prev|next|[<>«»]+)$/i.test(textOf(row)));
+    return rows.filter(row => !rows.some(other => other !== row && other.contains(row)));
+  }
+  // What a row is called: its link or first cell, not the whole row ("숭실대학교 | 서울 동작구 | 선택").
+  function rowName(row) {
+    const named = row.querySelector("a, strong, th, td, .name, [class*='name' i]");
+    const text = named && !/^\s*선택\s*$/.test(textOf(named)) ? textOf(named) : "";
+    return text || textOf(row);
+  }
+  function rowTarget(row) {
+    const buttons = [...row.querySelectorAll(CLICKABLE)].filter(visible);
+    return buttons.find(button => /선택|select|choose/i.test(buttonText(button))) || buttons[0] || row;
+  }
+
+  function pickRow(value, rows) {
+    const { pickOption } = globalThis.AutoFolioMatch;
+    let picked = pickOption(value, rows.map(rowName));
+    if (picked.index < 0 && !picked.candidates.length) picked = pickOption(value, rows.map(textOf));
+    return picked;
+  }
+
+  // Search inside a layer: type the value in its box if it has one, press its search button (or
+  // Enter), wait for rows, pick the one that matches, and wait for the layer to hand the pick back.
+  async function driveLayer(layer, element, value, before) {
+    let root = layerRoot(layer);
+    for (let waited = 0; waited < 2000 && !textBoxes(root).length && !rowsIn(root).length; waited += 150) {
+      await wait(150);
+      root = layerRoot(layer);
+    }
+    const box = textBoxes(root).find(input => input !== element);
+    let rows = rowsIn(root);
+    if (box) {
+      const stale = new Set(rows);
+      if (box.value.trim() !== value) typeInto(box, value);
+      const button = [...root.querySelectorAll(CLICKABLE)].find(item => visible(item) && isSearchButton(item));
+      if (button) choose(button);
+      else pressEnter(box);
+      rows = [];
+      for (let waited = 0; waited < 5000; waited += 150) {
+        await wait(150);
+        root = layerRoot(layer);
+        const now = rowsIn(root);
+        if (now.length && (!stale.size || now.some(row => !stale.has(row)))) { rows = now; break; }
+      }
+    }
+    if (!rows.length) return { status: "review", detail: "검색창을 열었지만 결과를 찾지 못했습니다. 직접 선택하세요." };
+    const picked = pickRow(value, rows);
+    if (picked.index < 0) {
+      const listed = (picked.candidates.length ? picked.candidates : rows.slice(0, 3).map(rowName)).join(", ");
+      return { status: "review", detail: `검색 결과: ${picked.reason} (${listed}). 직접 선택하세요.` };
+    }
+    const name = rowName(rows[picked.index]);
+    choose(rowTarget(rows[picked.index]));
+    for (let waited = 0; waited < 3000; waited += 150) {
+      await wait(150);
+      if (read(element) !== before || !layer.isConnected || !visible(layer)) break;
+    }
+    const check = picked.loose ? " · 비슷한 이름으로 골랐으니 확인하세요" : "";
+    // The box changed, or (when it already held the typed name) the layer closed on the pick.
+    const closed = !layer.isConnected || !visible(layer);
+    if (read(element) !== before || (closed && read(element).trim())) return { status: "filled", detail: `검색창에서 "${name}" 선택 · ${picked.reason}${check}` };
+    return { status: "review", detail: `검색창에서 "${name}"을 골랐지만 칸에 값이 보이지 않습니다. 확인하세요.` };
+  }
+
+  // No search worked: put the saved value in directly and say so.
+  function fillDirectly(item, element, value, why) {
+    const zip = /zipCode$/.test(item.type || "");
+    const text = zip ? value : formattedValue(element, value);
+    setNativeValue(element, text);
+    const shown = read(element) === text;
+    if (!SEARCH_TYPES.test(item.type || "")) {
+      return { token: item.token, status: shown ? "filled" : "failed", detail: shown ? "읽기 전용 칸에 직접 입력" : "읽기 전용 칸에 넣지 못했습니다.", expected: text };
+    }
+    return { token: item.token, status: shown ? "review" : "failed", detail: shown
+      ? `${why} 저장된 값을 검색 없이 넣었습니다. 사이트가 검색 결과로만 받는 칸이면 직접 검색하세요.` : `${why} 직접 검색하세요.` };
+  }
+
+  async function fillViaButton(item, element, value) {
+    const address = ADDRESS_TYPES.test(item.type || "");
+    // Kakao may already have filled this box while handling the zip code (or the other way round).
+    const squashed = text => String(text || "").replace(/\s+/g, "");
+    const now = squashed(read(element));
+    if (address && element.readOnly && now && (now === squashed(value) || squashed(value).startsWith(now) || now.startsWith(squashed(value).slice(0, 8)))) {
+      return { token: item.token, status: "filled", detail: "주소 검색으로 채워짐" };
+    }
+    const button = searchButtonFor(element);
+    if (!button) return fillDirectly(item, element, value, "옆에 검색 버튼이 없어");
+    const query = address ? fillValues["personal.address"] || value : value;
+    // Type first when the box takes typing: "입력 후 [검색]" sites search for what is in it.
+    if (!element.readOnly && !element.disabled && !address) typeInto(element, value);
+    const before = read(element);
+    const layersBefore = new Set(openLayers());
+    const optionsBefore = visibleOptions(element);
+    const pressedAt = Date.now();
+    postcode.readyAt = 0;
+    choose(button);
+    for (let waited = 0; waited < 6000; waited += 200) {
+      await wait(200);
+      if (waited % 1000 === 0) pingFrames();
+      if (postcode.readyAt >= pressedAt && postcode.source) {
+        if (!address) break;
+        const answer = await postcodeSearch(query, fillValues["personal.zipCode"] || "");
+        for (let settle = 0; settle < 2000 && read(element) === before; settle += 150) await wait(150);
+        if (answer.status === "filled" && read(element) !== before) return { token: item.token, status: "filled", detail: answer.detail };
+        return { token: item.token, status: "review", detail: answer.detail || "주소 검색 결과가 칸에 들어가지 않았습니다. 확인하세요." };
+      }
+      // Some sites fill a read-only box straight away (a single match).
+      if (element.readOnly && read(element) !== before && read(element).trim()) {
+        return { token: item.token, status: "filled", detail: "검색 버튼으로 채워짐" };
+      }
+      const options = visibleOptions(element).filter(option => !optionsBefore.includes(option));
+      if (options.length) return await pickListed(item, element, value, options);
+      const layer = openLayers().find(node => !layersBefore.has(node));
+      if (layer) return { token: item.token, ...(await driveLayer(layer, element, value, before)) };
+      if (Number(document.documentElement.dataset.autofolioPopupAt || 0) >= pressedAt) return await waitForUserWindow(item, element, before);
+    }
+    return fillDirectly(item, element, value, "검색 버튼을 눌렀지만 검색창을 찾지 못해");
+  }
+
+  // A list that appeared beside the box: the same picking as type-ahead boxes.
+  async function pickListed(item, element, value, options) {
+    const texts = options.map(option => textOf(option));
+    const picked = globalThis.AutoFolioMatch.pickOption(value, texts);
+    if (picked.index < 0) {
+      const listed = (picked.candidates.length ? picked.candidates : texts.slice(0, 3)).join(", ");
+      return { token: item.token, status: "review", detail: `검색 결과: ${picked.reason} (${listed}). 직접 선택하세요.` };
+    }
+    const before = read(element);
+    choose(options[picked.index]);
+    await wait(400);
+    const shown = read(element) !== before || shownNearby(element, texts[picked.index]);
+    return { token: item.token, status: shown ? "filled" : "review",
+      detail: shown ? `검색 결과에서 "${texts[picked.index]}" 선택 · ${picked.reason}` : `"${texts[picked.index]}"을 골랐지만 화면에서 확인되지 않습니다.` };
+  }
+
+  // The site opened its own window (another page AutoFolio is not in): the user picks there.
+  async function waitForUserWindow(item, element, before) {
+    const notice = showNotice("검색 창이 새로 열렸습니다. 그 창에서 직접 골라 주세요. 창이 닫히면 이어서 채웁니다.", [["done", "골랐음"], ["skip", "건너뛰기"]]);
+    let answer = null;
+    notice.choice.then(value => { answer = value; });
+    for (let waited = 0; !answer && waited < 5 * 60 * 1000; waited += 500) {
+      await wait(500);
+      if (!document.documentElement.dataset.autofolioPopupOpen) answer = "closed";
+    }
+    notice.close();
+    if (read(element) !== before && read(element).trim()) return { token: item.token, status: "filled", detail: "새 창에서 사용자가 선택" };
+    return { token: item.token, status: "review", detail: "검색 창이 새로 열려 직접 고르도록 넘겼습니다. 확인하세요." };
+  }
+
   async function fillOne(item) {
     const element = elements.get(item.token);
     if (!element?.isConnected) return { token: item.token, status: "skipped", detail: "필드가 바뀌었습니다. 다시 분석하세요." };
@@ -942,8 +1170,10 @@
       return await fillParts(item, part.members, value);
     }
     try {
-      if (element.readOnly) {
-        return { token: item.token, status: "review", detail: "읽기 전용 칸입니다. 옆의 검색 버튼(예: 우편번호)으로 입력하세요." };
+      // Read-only boxes (주소, 학교명) and search-type items with a [검색] button beside them go
+      // through the site's own search; see fillViaButton.
+      if (element.readOnly || (SEARCH_TYPES.test(item.type || "") && !isSearchInput(element) && searchButtonFor(element))) {
+        return await fillViaButton(item, element, value);
       }
       if (isSearchInput(element)) return await fillSearch(item, element, value);
       let expected = formattedValue(element, value);
@@ -998,6 +1228,7 @@
       return true;
     }
     if (message.action === "step") {
+      fillValues = Object.fromEntries(message.items.filter(item => item.type).map(item => [item.type, item.value]));
       startSteps(message.items);
       sendResponse(stepBar.state());
     }
@@ -1018,6 +1249,7 @@
         loginWaited = false;
         log(`${message.items.length}개 칸 입력 시작`);
         const snaps = [];
+        fillValues = Object.fromEntries(message.items.filter(item => item.type).map(item => [item.type, item.value]));
         for (const item of message.items) results.push(await fillRecorded(item, snaps));
         fillHistory.push({ label: `${message.label || "모두 채우기"} ${results.length}칸`, snaps });
         // Controlled inputs can rerender after an event. Verify once more after the page settles.

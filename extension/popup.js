@@ -267,7 +267,8 @@ async function chosenItems() {
   const values = new Map(allValues(profile).map(item => [item.key, item.value]));
   const labelOf = token => { const field = fields.find(field => field.token === token); return field?.label || field?.name || "입력칸"; };
   return { profile, items: choices.filter(choice => choice.select.value && values.has(choice.select.value))
-    .map(choice => ({ token: choice.token, value: values.get(choice.select.value), label: labelOf(choice.token) })) };
+    .map(choice => ({ token: choice.token, value: values.get(choice.select.value), label: labelOf(choice.token),
+      type: choice.select.value.slice(0, choice.select.value.lastIndexOf(":")) })) };
 }
 
 // Like an editor's "replace one by one": the page bar and this panel walk through the chosen
@@ -370,7 +371,7 @@ fillButton.addEventListener("click", async () => {
       const more = followUpItems(seen, fields, field => suggestions.get(field.token)?.type, valueList, lastEntries);
       render(valueList, suggestions);
       if (!more.length) break;
-      const next = await send("fill", { items: more.map(({ token, value }) => ({ token, value })) });
+      const next = await send("fill", { items: more.map(({ token, value, type }) => ({ token, value, type })) });
       entries.push(...next.results.map(result => ({ label: `${labelOf(result.token)} (이어서)`, result })));
       results = [...results, ...next.results];
       invalidFields = next.invalidFields || [];

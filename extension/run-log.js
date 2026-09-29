@@ -28,7 +28,7 @@ export function createRun(url, fields, suggestions, now = new Date()) {
         token: field.token, label: field.label || field.ariaLabel || field.placeholder || "", section: field.section,
         name: field.name, inputType: field.inputType, required: field.required,
         optionCount: field.options?.length || 0, suggested: suggestion.type || null, reason: suggestion.reason || "",
-        loop: field.loop || null, part: field.part || null,
+        loop: field.loop || null, part: field.part || null, readOnly: Boolean(field.readOnly), searchButton: field.searchButton || "",
         placeholder: field.placeholder || "", title: field.title || "",
         // The ranked candidates, so a right answer in 2nd or 3rd place shows up in the log.
         candidates: rankedShares(suggestion.candidates)

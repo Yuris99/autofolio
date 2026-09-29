@@ -300,7 +300,8 @@
     gender: checked("genderFlag") === "F",
     birthday: value("birthday") === "1999.01.31",
     nationality: value("nationality") === "KR",
-    readonlyAddressLeftToUser: status["currentAddress.address"] === "review" && !value("currentAddress.address"),
+    // The fixture's 우편번호 button opens nothing: the saved address goes in directly, marked for checking.
+    readonlyAddressFilledForReview: status["currentAddress.address"] === "review" && Boolean(value("currentAddress.address")),
     addressDetail: value("currentAddress.detailAddress") === "1층",
     military: checked("military.militaryTypeCode") === "01" && value("military.militaryPositionCode") === "04" &&
       value("military.militaryStartDate") === "2019.03" && value("military.militaryEndDate") === "2020.09" &&
